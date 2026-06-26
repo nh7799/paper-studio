@@ -21,7 +21,14 @@ import {
   encodeSettings,
   decodeSettings,
 } from "./paperEngine";
-import jsPDF from "jspdf";
+import {
+  Document,
+  Page,
+  View,
+  Text,
+  StyleSheet,
+  pdf,
+} from "@react-pdf/renderer";
 
 function loadInitialSettings() {
   try {
@@ -41,7 +48,6 @@ function loadInitialSettings() {
 export default function App() {
   const canvasRef = useRef(null);
   const viewportRef = useRef(null);
-  const renderCount = useRef(0);
 
   const {
     state: settings,
@@ -93,20 +99,18 @@ export default function App() {
       return computeStats(settings);
     } catch (e) {
       console.error("computeStats error:", e);
-      // Fallback stats
       return {
         width: 800,
-        height: 1130,
+        height: 1131,
         lineCount: 20,
         spacingMm: 5,
         marginMm: 10,
         pageSize: "Custom",
-        pixelSize: "800×1130",
+        pixelSize: "800×1131",
       };
     }
   }, [settings]);
 
-  // Safe drawing function
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -115,7 +119,6 @@ export default function App() {
     const h = canvas.height;
     if (!w || !h) return;
 
-    // Always clear and fill with paper color
     ctx.fillStyle = settings.paperColor || "#ffffff";
     ctx.fillRect(0, 0, w, h);
 
@@ -123,7 +126,6 @@ export default function App() {
       drawPaper(canvas, settings);
     } catch (e) {
       console.error("drawPaper error:", e);
-      // Fallback: draw a basic grid
       ctx.strokeStyle = settings.ruleColor || "#cccccc";
       ctx.lineWidth = settings.thickness || 1;
       const spacing = settings.spacing || 50;
@@ -149,7 +151,6 @@ export default function App() {
     draw();
   }, [draw]);
 
-  // Save settings to localStorage
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
   }, [settings]);
@@ -165,11 +166,10 @@ export default function App() {
     [set, settings.format, settings.orientation, showToast],
   );
 
-  // ---- SVG Export ----
   const handleExportSVG = useCallback(() => {
     try {
       const width = canvasRef.current?.width || 800;
-      const height = canvasRef.current?.height || 1130;
+      const height = canvasRef.current?.height || 1131;
       const lines = [];
       lines.push(
         `<rect width="${width}" height="${height}" fill="${settings.paperColor}" />`,
@@ -220,56 +220,173 @@ export default function App() {
 
       const entry = { type: "SVG", time: Date.now(), format: settings.format };
       setRecentExports((prev) => [entry, ...prev].slice(0, 5));
-      showToast("SVG downloaded");
+      showToast("Vector SVG downloaded");
     } catch (e) {
       console.error(e);
       showToast("SVG export failed", "error");
     }
   }, [settings, stats, showToast]);
 
-  // ---- PDF Export (fixed) ----
   const handleExportPDF = useCallback(async () => {
-    if (!canvasRef.current) {
-      showToast("Canvas not ready", "error");
-      return;
-    }
     setDownloading(true);
     try {
-      draw(); // refresh canvas
-      const canvas = canvasRef.current;
-      const width = stats.width || 800;
-      const height = stats.height || 1130;
-      const imgData = canvas.toDataURL("image/png");
+      const PAPER_SIZES_PT = {
+        a4: [595.28, 841.89],
+        a5: [419.53, 595.28],
+        a3: [841.89, 1190.55],
+        letter: [612, 792],
+        legal: [612, 1008],
+        executive: [522, 756],
+      };
 
-      const pdf = new jsPDF({
-        orientation:
-          settings.orientation === "landscape" ? "landscape" : "portrait",
-        unit: "px",
-        format: [width, height],
-        compress: true,
-      });
-      pdf.addImage(imgData, "PNG", 0, 0, width, height);
+      const formatKey = settings.format || "a4";
+      const format = PAPER_FORMATS[formatKey] || PAPER_FORMATS.a4;
+      let pageSize = PAPER_SIZES_PT[formatKey];
 
-      const pageCount = settings.pageCount || 1;
-      for (let i = 1; i < pageCount; i++) {
-        pdf.addPage(
-          [width, height],
-          settings.orientation === "landscape" ? "landscape" : "portrait",
-        );
-        pdf.addImage(imgData, "PNG", 0, 0, width, height);
+      if (!pageSize) {
+        const mmToPt = 2.83465;
+        pageSize = [format.mmW * mmToPt, format.mmH * mmToPt];
       }
-      pdf.save(`paper-${settings.format || "custom"}.pdf`);
+
+      const isLandscape = settings.orientation === "landscape";
+      if (isLandscape) {
+        pageSize = [pageSize[1], pageSize[0]];
+      }
+
+      const canvasW = isLandscape ? format.height : format.width;
+      const pdfScale = pageSize[0] / canvasW;
+
+      const styles = StyleSheet.create({
+        page: {
+          padding: 0,
+          backgroundColor: settings.paperColor || "#ffffff",
+          flexDirection: "column",
+        },
+        gridLine: {
+          borderBottomWidth: `${(settings.thickness || 1) * pdfScale}px`,
+          borderBottomColor: settings.ruleColor || "#000000",
+          borderBottomStyle:
+            settings.lineStyle === "dashed"
+              ? "dashed"
+              : settings.lineStyle === "dotted"
+                ? "dotted"
+                : "solid",
+          height: `${(settings.spacing || 50) * pdfScale}px`,
+          width: "100%",
+          flexShrink: 0,
+        },
+        marginLineWrapper: {
+          position: "absolute",
+          top: 0,
+          bottom: 0,
+          left: (settings.side || 0) * pdfScale,
+          width: `${(settings.sideWidth || 2) * pdfScale}px`,
+          backgroundColor: settings.sideColor || "#999999",
+        },
+        header: {
+          fontSize: 14 * pdfScale,
+          color: settings.ruleColor || "#000000",
+          opacity: 0.5,
+          textAlign: "center",
+          marginTop: 20 * pdfScale,
+          fontFamily: "Helvetica",
+          position: "absolute",
+          width: "100%",
+          top: 0,
+        },
+        footer: {
+          fontSize: 12 * pdfScale,
+          color: settings.ruleColor || "#000000",
+          opacity: 0.5,
+          textAlign: "center",
+          marginBottom: 20 * pdfScale,
+          fontFamily: "Helvetica",
+          position: "absolute",
+          width: "100%",
+          bottom: 0,
+        },
+        watermark: {
+          fontSize: pageSize[0] * 0.06,
+          color: settings.ruleColor || "#000000",
+          opacity: settings.watermarkOpacity || 0.15,
+          fontWeight: "bold",
+          textAlign: "center",
+          transform: "rotate(-30deg)",
+          position: "absolute",
+          top: "50%",
+          left: "50%",
+          marginTop: -(pageSize[0] * 0.06 * 0.5),
+          marginLeft: -(pageSize[0] * 0.06 * 1.5),
+          fontFamily: "Helvetica-Bold",
+        },
+      });
+
+      const PdfDocument = () => {
+        const gridLineCount = Math.floor(
+          pageSize[1] / ((settings.spacing || 50) * pdfScale),
+        );
+
+        return (
+          <Document>
+            {Array.from({ length: settings.pageCount || 1 }).map(
+              (_, pageIdx) => (
+                <Page key={pageIdx} size={pageSize} style={styles.page}>
+                  {Array.from({ length: gridLineCount }).map((_, i) => (
+                    <View
+                      key={`grid-${pageIdx}-${i}`}
+                      style={styles.gridLine}
+                    />
+                  ))}
+
+                  {settings.side && settings.side > 0 && (
+                    <View style={styles.marginLineWrapper} />
+                  )}
+
+                  {settings.headerText && (
+                    <Text style={styles.header}>{settings.headerText}</Text>
+                  )}
+
+                  {settings.footerText && (
+                    <Text style={styles.footer}>{settings.footerText}</Text>
+                  )}
+
+                  {settings.watermarkText && (
+                    <Text style={styles.watermark}>
+                      {settings.watermarkText}
+                    </Text>
+                  )}
+                </Page>
+              ),
+            )}
+          </Document>
+        );
+      };
+
+      const blob = await pdf(<PdfDocument />).toBlob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `paper-${settings.format || "custom"}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
 
       const entry = { type: "PDF", time: Date.now(), format: settings.format };
       setRecentExports((prev) => [entry, ...prev].slice(0, 5));
-      showToast(`PDF exported (${pageCount} page${pageCount > 1 ? "s" : ""})`);
+      showToast(
+        `Vector PDF exported (${settings.pageCount || 1} page${(settings.pageCount || 1) > 1 ? "s" : ""})`,
+      );
     } catch (e) {
-      console.error(e);
-      showToast("PDF export failed", "error");
+      console.error("PDF generation error:", e);
+      showToast(
+        "PDF export failed: " + (e.message || "unknown error"),
+        "error",
+      );
     } finally {
       setDownloading(false);
     }
-  }, [settings, stats, draw, showToast]);
+  }, [settings, stats, showToast]);
 
   const handleExportPNG = useCallback(async () => {
     if (!canvasRef.current) return;
@@ -303,7 +420,6 @@ export default function App() {
     }
   }, [settings, showToast]);
 
-  // Command palette items
   const commands = useMemo(
     () => [
       ...Object.entries(PRESETS).map(([key, p]) => ({
@@ -315,7 +431,7 @@ export default function App() {
       })),
       {
         id: "export-pdf",
-        label: "Export PDF",
+        label: "Export Vector PDF",
         group: "Export",
         icon: "↓",
         shortcut: ["⌘", "S"],
@@ -396,7 +512,6 @@ export default function App() {
     ],
   );
 
-  // Keyboard shortcuts
   useEffect(() => {
     const handler = (e) => {
       const mod = e.metaKey || e.ctrlKey;
@@ -478,13 +593,11 @@ export default function App() {
     { id: "export", label: "Export" },
   ];
 
-  // Safe canvas dimensions
   const canvasWidth = stats.width && stats.width > 0 ? stats.width : 800;
-  const canvasHeight = stats.height && stats.height > 0 ? stats.height : 1130;
+  const canvasHeight = stats.height && stats.height > 0 ? stats.height : 1131;
 
   return (
     <div className="h-screen w-screen overflow-hidden flex flex-col bg-luxury-obsidian text-luxury-pearl relative">
-      {/* Ambient background */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="ambient-orb w-[600px] h-[600px] -top-48 -right-48 bg-luxury-gold/[0.04]" />
         <div
@@ -494,7 +607,6 @@ export default function App() {
         <div className="absolute inset-0 noise-overlay opacity-50" />
       </div>
 
-      {/* Header */}
       <header className="relative h-14 flex items-center justify-between px-5 border-b border-white/[0.06] glass-panel flex-shrink-0 z-20">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-3">
@@ -556,7 +668,6 @@ export default function App() {
       </header>
 
       <div className="flex flex-1 overflow-hidden min-h-0 relative z-10">
-        {/* Sidebar */}
         {!isFullscreen && (
           <aside
             className={`${sidebarCollapsed ? "w-0 opacity-0" : "w-[360px] opacity-100"} flex flex-col border-r border-white/[0.06] glass-panel flex-shrink-0 transition-all duration-300 overflow-hidden`}
@@ -572,7 +683,6 @@ export default function App() {
                 </button>
               ))}
             </div>
-
             <div className="flex-1 overflow-y-auto inspector-scroll p-4 space-y-5">
               {activeTab === "design" && (
                 <>
@@ -706,7 +816,6 @@ export default function App() {
                   </section>
                 </>
               )}
-
               {activeTab === "typography" && (
                 <>
                   <section className="space-y-4">
@@ -759,7 +868,6 @@ export default function App() {
                   </section>
                 </>
               )}
-
               {activeTab === "export" && (
                 <>
                   <section className="space-y-4">
@@ -822,14 +930,13 @@ export default function App() {
                 </>
               )}
             </div>
-
             <div className="p-4 border-t border-white/[0.04] space-y-2 flex-shrink-0">
               <button
                 onClick={handleExportPDF}
                 disabled={downloading}
                 className="luxury-btn-primary w-full text-xs uppercase tracking-[0.15em] disabled:opacity-50"
               >
-                {downloading ? "Rendering..." : "Export PDF"}
+                {downloading ? "Generating PDF..." : "Export Vector PDF"}
               </button>
               <div className="grid grid-cols-2 gap-2">
                 <button
@@ -862,7 +969,6 @@ export default function App() {
             </div>
           </aside>
         )}
-
         {!isFullscreen && (
           <button
             onClick={() => setSidebarCollapsed((c) => !c)}
@@ -872,7 +978,6 @@ export default function App() {
             {sidebarCollapsed ? "›" : "‹"}
           </button>
         )}
-
         <main
           ref={viewportRef}
           className="flex-1 flex flex-col overflow-hidden min-w-0"
@@ -916,7 +1021,6 @@ export default function App() {
               </button>
             </div>
           </div>
-
           <div className="flex-1 flex items-center justify-center p-6 overflow-auto inspector-scroll relative">
             <div
               className="relative transition-transform duration-300 ease-out"
@@ -935,7 +1039,6 @@ export default function App() {
               <div className="absolute inset-0 rounded-sm pointer-events-none ring-1 ring-black/10" />
             </div>
           </div>
-
           <div className="flex items-center justify-between px-4 py-2 border-t border-white/[0.04] glass-panel flex-shrink-0 text-[10px] font-mono">
             <div className="flex items-center gap-4 text-luxury-pearl/30">
               <span>

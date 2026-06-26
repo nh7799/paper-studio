@@ -117,7 +117,8 @@ function drawMusicStaff(ctx, width, height, settings) {
 }
 
 function drawMargin(ctx, width, height, settings) {
-  if (settings.layoutMode === "cornell" || settings.layoutMode === "music") return;
+  if (settings.layoutMode === "cornell" || settings.layoutMode === "music")
+    return;
   ctx.fillStyle = settings.sideColor;
   ctx.fillRect(settings.side, 0, settings.sideWidth, height);
 }
@@ -192,11 +193,13 @@ export function drawPaper(canvas, settings) {
 export function computeStats(settings) {
   const { width, height, mmW, mmH } = getDimensions(settings);
   const scale = mmW / width;
-  const lineCount = settings.layoutMode === "ruled" || settings.layoutMode === "cornell"
-    ? Math.floor((height - settings.spacing) / settings.spacing)
-    : settings.layoutMode === "graph"
-      ? Math.floor(width / settings.spacing) * Math.floor(height / settings.spacing)
-      : 0;
+  const lineCount =
+    settings.layoutMode === "ruled" || settings.layoutMode === "cornell"
+      ? Math.floor((height - settings.spacing) / settings.spacing)
+      : settings.layoutMode === "graph"
+        ? Math.floor(width / settings.spacing) *
+          Math.floor(height / settings.spacing)
+        : 0;
 
   return {
     lineCount,
@@ -204,78 +207,9 @@ export function computeStats(settings) {
     spacingMm: Math.round(settings.spacing * scale * 10) / 10,
     pageSize: `${mmW} × ${mmH} mm`,
     pixelSize: `${width} × ${height}`,
+    width,
+    height,
   };
-}
-
-function hexToRgb(hex) {
-  const h = hex.replace("#", "");
-  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
-  const n = parseInt(full, 16);
-  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
-}
-
-function setPdfColor(pdf, hex, type = "draw") {
-  const { r, g, b } = hexToRgb(hex);
-  if (type === "fill") pdf.setFillColor(r, g, b);
-  else pdf.setDrawColor(r, g, b);
-}
-
-export async function exportPDF(settings) {
-  const { mmW, mmH, width } = getDimensions(settings);
-  const scale = mmW / width;
-
-  const pdf = new jsPDF({
-    orientation: settings.orientation === "landscape" ? "landscape" : "portrait",
-    unit: "mm",
-    format: [mmW, mmH],
-    compress: true,
-  });
-
-  const pages = Math.min(Math.max(1, settings.pageCount), 100);
-
-  for (let page = 0; page < pages; page++) {
-    if (page > 0) pdf.addPage([mmW, mmH]);
-
-    setPdfColor(pdf, settings.paperColor, "fill");
-    pdf.rect(0, 0, mmW, mmH, "F");
-
-    const spacingMm = settings.spacing * scale;
-    const thicknessMm = settings.thickness * scale;
-
-    if (settings.layoutMode === "ruled" || settings.layoutMode === "cornell") {
-      setPdfColor(pdf, settings.ruleColor);
-      pdf.setLineWidth(thicknessMm);
-      const maxY = settings.layoutMode === "cornell" ? mmH * 0.85 : mmH;
-      for (let y = spacingMm; y < maxY; y += spacingMm) {
-        pdf.line(0, y, mmW, y);
-      }
-    }
-
-    if (settings.layoutMode === "graph") {
-      setPdfColor(pdf, settings.ruleColor);
-      pdf.setLineWidth(thicknessMm);
-      for (let x = spacingMm; x < mmW; x += spacingMm) pdf.line(x, 0, x, mmH);
-      for (let y = spacingMm; y < mmH; y += spacingMm) pdf.line(0, y, mmW, y);
-    }
-
-    if (settings.layoutMode !== "cornell" && settings.layoutMode !== "music") {
-      setPdfColor(pdf, settings.sideColor, "fill");
-      pdf.rect(settings.side * scale, 0, settings.sideWidth * scale, mmH, "F");
-    }
-
-    if (settings.headerText) {
-      pdf.setFontSize(8);
-      setPdfColor(pdf, settings.ruleColor);
-      pdf.text(settings.headerText, mmW / 2, 8, { align: "center" });
-    }
-    if (settings.footerText) {
-      pdf.setFontSize(8);
-      setPdfColor(pdf, settings.ruleColor);
-      pdf.text(settings.footerText, mmW / 2, mmH - 5, { align: "center" });
-    }
-  }
-
-  pdf.save(`paper-studio-pro-${Date.now()}.pdf`);
 }
 
 export async function exportPNG(canvas) {

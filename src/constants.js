@@ -1,9 +1,9 @@
 export const PAPER_FORMATS = {
-  a4: { label: "A4", width: 2480, height: 3508, mmW: 210, mmH: 297 },
-  a5: { label: "A5", width: 1748, height: 2480, mmW: 148, mmH: 210 },
-  letter: { label: "US Letter", width: 2550, height: 3300, mmW: 216, mmH: 279 },
-  legal: { label: "US Legal", width: 2550, height: 4200, mmW: 216, mmH: 356 },
-  a3: { label: "A3", width: 3508, height: 4961, mmW: 297, mmH: 420 },
+  a4: { label: "A4", width: 800, height: 1131, mmW: 210, mmH: 297 },
+  a5: { label: "A5", width: 566, height: 800, mmW: 148, mmH: 210 },
+  letter: { label: "US Letter", width: 800, height: 1033, mmW: 216, mmH: 279 },
+  legal: { label: "US Legal", width: 800, height: 1319, mmW: 216, mmH: 356 },
+  a3: { label: "A3", width: 1131, height: 1600, mmW: 297, mmH: 420 },
 };
 
 export const LAYOUT_MODES = {
