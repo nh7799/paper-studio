@@ -98,9 +98,45 @@ export default function App() {
 
   const stats = useMemo(() => computeStats(settings), [settings]);
 
+  // Defensive draw: catches errors from drawPaper and falls back to a safe render
   const draw = useCallback(() => {
-    if (canvasRef.current) drawPaper(canvasRef.current, settings);
-  }, [settings]);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const w = canvas.width;
+    const h = canvas.height;
+    if (!w || !h) return;
+
+    // Always start with a clean canvas filled with paperColor
+    ctx.fillStyle = settings.paperColor;
+    ctx.fillRect(0, 0, w, h);
+
+    try {
+      drawPaper(canvas, settings);
+    } catch (e) {
+      console.error("drawPaper error:", e);
+      // Fallback: draw a simple grid so the user sees something
+      ctx.strokeStyle = settings.ruleColor;
+      ctx.lineWidth = settings.thickness || 1;
+      const spacing = settings.spacing || 50;
+      for (let y = spacing; y < h; y += spacing) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(w, y);
+        ctx.stroke();
+      }
+      // Draw margin line if defined
+      if (settings.side && settings.side < w) {
+        ctx.strokeStyle = settings.sideColor;
+        ctx.lineWidth = settings.sideWidth || 2;
+        ctx.beginPath();
+        ctx.moveTo(settings.side, 0);
+        ctx.lineTo(settings.side, h);
+        ctx.stroke();
+      }
+      showToast("Rendering engine recovered – check console for details", "info");
+    }
+  }, [settings, showToast]);
 
   useEffect(() => {
     draw();
@@ -179,7 +215,7 @@ export default function App() {
     [set, settings.format, settings.orientation, showToast]
   );
 
-  // Native Vector SVG Generation Engine
+  // SVG Export (unchanged, works)
   const handleExportSVG = useCallback(() => {
     try {
       const width = canvasRef.current?.width || 800;
@@ -187,41 +223,34 @@ export default function App() {
 
       let svgElements = [];
 
-      // 1. Paper Background Document
       svgElements.push(`<rect width="${width}" height="${height}" fill="${settings.paperColor}" />`);
 
-      // 2. Margin Guideline
       if (settings.side) {
         svgElements.push(
           `  <line x1="${settings.side}" y1="0" x2="${settings.side}" y2="${height}" stroke="${settings.sideColor}" stroke-width="${settings.sideWidth}" />`
         );
       }
 
-      // 3. Grid Lines / Rule Paths
       const lineCount = stats.lineCount || Math.floor(height / settings.spacing);
       const startY = settings.spacing;
-
       for (let i = 0; i < lineCount; i++) {
         const y = startY + i * settings.spacing;
         if (y < height) {
           let dashArray = "";
           if (settings.lineStyle === "dashed") dashArray = 'stroke-dasharray="6,4"';
           if (settings.lineStyle === "dotted") dashArray = 'stroke-dasharray="2,4"';
-
           svgElements.push(
             `  <line x1="0" y1="${y}" x2="${width}" y2="${y}" stroke="${settings.ruleColor}" stroke-width="${settings.thickness}" ${dashArray} />`
           );
         }
       }
 
-      // 4. Vector Watermark Text
       if (settings.watermarkText) {
         svgElements.push(
           `  <text x="${width / 2}" y="${height / 2}" fill="${settings.ruleColor}" opacity="${settings.watermarkOpacity}" font-family="sans-serif" font-size="${width * 0.07}" font-weight="bold" text-anchor="middle" transform="rotate(-45 ${width / 2} ${height / 2})">${settings.watermarkText}</text>`
         );
       }
 
-      // 5. Typography Headers & Footers
       if (settings.headerText) {
         svgElements.push(
           `  <text x="${width / 2}" y="50" fill="${settings.ruleColor}" opacity="0.5" font-family="sans-serif" font-size="14" text-anchor="middle" letter-spacing="1">${settings.headerText}</text>`
@@ -252,11 +281,11 @@ export default function App() {
 
       showToast("Scalable Vector Graphic (SVG) downloaded");
     } catch (e) {
-      showToast("SVG Engine export failed", "error");
+      showToast("SVG export failed", "error");
     }
   }, [settings, stats, recentExports, showToast]);
 
-  // FIXED PDF export using jsPDF to capture canvas
+  // Fixed PDF export with jsPDF (handles multi‑page)
   const handleExportPDF = useCallback(async () => {
     if (!canvasRef.current) {
       showToast("Canvas not ready", "error");
@@ -264,17 +293,14 @@ export default function App() {
     }
     setDownloading(true);
     try {
-      // Ensure the canvas is up-to-date
-      draw();
+      draw(); // ensure latest content
 
       const canvas = canvasRef.current;
       const width = stats.width || 800;
       const height = stats.height || 1130;
 
-      // Get image data from canvas
       const imgData = canvas.toDataURL("image/png");
 
-      // Create PDF with the correct page size and orientation
       const pdf = new jsPDF({
         orientation: settings.orientation === "landscape" ? "landscape" : "portrait",
         unit: "px",
@@ -282,20 +308,16 @@ export default function App() {
         compress: true,
       });
 
-      // Add the image to the first page (it will fill the whole page)
       pdf.addImage(imgData, "PNG", 0, 0, width, height);
 
-      // Multi-page export: duplicate the same content for each additional page
       const pageCount = settings.pageCount || 1;
       for (let i = 1; i < pageCount; i++) {
         pdf.addPage([width, height], settings.orientation === "landscape" ? "landscape" : "portrait");
         pdf.addImage(imgData, "PNG", 0, 0, width, height);
       }
 
-      // Save the PDF
       pdf.save(`paper-${settings.format || "custom"}.pdf`);
 
-      // Update recent exports
       const entry = { type: "PDF", time: Date.now(), format: settings.format };
       const updated = [entry, ...recentExports].slice(0, 5);
       setRecentExports(updated);
@@ -410,6 +432,7 @@ export default function App() {
     [applyPreset, handleExportPDF, handleExportSVG, handleExportPNG, copyConfig, shareLink, undo, redo, set]
   );
 
+  // Keyboard shortcuts
   useEffect(() => {
     const handler = (e) => {
       const mod = e.metaKey || e.ctrlKey;
@@ -483,6 +506,10 @@ export default function App() {
     { id: "typography", label: "Typography" },
     { id: "export", label: "Export" },
   ];
+
+  // Ensure we always have valid dimensions
+  const canvasWidth = stats.width && stats.width > 0 ? stats.width : 800;
+  const canvasHeight = stats.height && stats.height > 0 ? stats.height : 1130;
 
   return (
     <div className="h-screen w-screen overflow-hidden flex flex-col bg-luxury-obsidian text-luxury-pearl relative">
@@ -934,8 +961,8 @@ export default function App() {
             >
               <canvas
                 ref={canvasRef}
-                width={stats.width || 800}
-                height={stats.height || 1130}
+                width={canvasWidth}
+                height={canvasHeight}
                 className="shadow-luxury-lg rounded-sm object-contain max-h-[calc(100vh-8rem)] max-w-full"
                 style={{ backgroundColor: settings.paperColor }}
               />
