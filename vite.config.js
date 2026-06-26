@@ -26,14 +26,6 @@ export default defineConfig({
     reportCompressedSize: false,
     chunkSizeWarningLimit: 500,
   },
-  server: {
-    strictPort: false,
-    hmr: {
-      protocol: 'ws',
-      host: 'localhost',
-      port: 5178,
-    },
-  },
   preview: {
     port: 4173,
   },

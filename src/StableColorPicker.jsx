@@ -5,37 +5,27 @@ const StableColorPicker = ({ label, value, onChange }) => {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef(null);
 
-  // Close ONLY when clicking outside entire component
   useEffect(() => {
     const handleMouseDown = (e) => {
       if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
         setOpen(false);
       }
     };
-
     document.addEventListener("mousedown", handleMouseDown);
     return () => document.removeEventListener("mousedown", handleMouseDown);
   }, []);
 
   return (
-    <div ref={wrapperRef} className="space-y-1.5 relative">
-      {/* LABEL */}
-      <div className="text-[10px] font-bold tracking-widest text-slate-400 uppercase">
-        {label}
-      </div>
-
-      {/* TRIGGER */}
+    <div ref={wrapperRef} className="space-y-2 relative">
+      <div className="text-[11px] text-luxury-pearl/50 font-medium">{label}</div>
       <div
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-3 p-2 rounded-xl border bg-slate-500/5 dark:bg-slate-400/5 cursor-pointer"
+        className="flex items-center gap-3 p-2.5 rounded-xl border border-white/[0.06] bg-white/[0.02] hover:border-luxury-gold/20 cursor-pointer transition-all duration-200"
       >
-        {/* SWATCH */}
         <div
-          className="w-9 h-7 rounded-lg border shadow-sm"
+          className="w-8 h-7 rounded-lg border border-white/10 shadow-inner"
           style={{ backgroundColor: value }}
         />
-
-        {/* HEX INPUT */}
         <input
           value={value}
           onChange={(e) => {
@@ -43,14 +33,13 @@ const StableColorPicker = ({ label, value, onChange }) => {
               onChange(e.target.value);
             }
           }}
-          className="w-full bg-transparent text-xs font-mono font-bold uppercase outline-none"
+          onClick={(e) => e.stopPropagation()}
+          className="w-full bg-transparent text-xs font-mono font-medium uppercase outline-none text-luxury-pearl/80"
         />
       </div>
-
-      {/* POPUP PICKER (FULL CONTROLLED UI) */}
       {open && (
-        <div className="absolute z-50 mt-2 p-3 rounded-xl shadow-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-slate-700">
-          <HexColorPicker color={value} onChange={onChange} />
+        <div className="absolute z-50 mt-2 p-3 rounded-xl shadow-luxury glass-panel border border-luxury-gold/20">
+          <HexColorPicker color={value} onChange={onChange} style={{ width: 200, height: 140 }} />
         </div>
       )}
     </div>

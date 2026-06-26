@@ -1,364 +1,704 @@
-import { useEffect, useRef, useState, useCallback } from "react";
-import { jsPDF } from "jspdf";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import StableColorPicker from "./StableColorPicker";
+import CommandPalette from "./components/CommandPalette";
+import Toast from "./components/Toast";
+import PremiumSlider from "./components/PremiumSlider";
+import ShortcutsModal from "./components/ShortcutsModal";
+import { useHistory } from "./hooks/useHistory";
+import {
+  DEFAULT_SETTINGS,
+  STORAGE_KEY,
+  PRESETS,
+  PAPER_FORMATS,
+  LAYOUT_MODES,
+  LINE_STYLES,
+  EXPORT_QUALITIES,
+} from "./constants";
+import {
+  drawPaper,
+  computeStats,
+  exportPDF,
+  exportPNG,
+  encodeSettings,
+  decodeSettings,
+} from "./paperEngine";
 
-// High-density presets configured for a 2480x3508 preview matrix (300 DPI A4 aspect ratio)
-const PRESETS = {
-  classic: { spacing: 80, thickness: 4, ruleColor: "#a0aec0", paperColor: "#ffffff", side: 320, sideWidth: 6, sideColor: "#e53e3e" },
-  minimal: { spacing: 60, thickness: 2, ruleColor: "#cbd5e0", paperColor: "#ffffff", side: 240, sideWidth: 3, sideColor: "#cbd5e0" },
-  bold: { spacing: 120, thickness: 8, ruleColor: "#4a5568", paperColor: "#ffffff", side: 380, sideWidth: 10, sideColor: "#2b6cb0" },
-  pastel: { spacing: 70, thickness: 4, ruleColor: "#fed7e2", paperColor: "#fffaf0", side: 280, sideWidth: 6, sideColor: "#b794f4" },
-  graph: { spacing: 70, thickness: 2, ruleColor: "#cbd5e0", paperColor: "#ffffff", side: 300, sideWidth: 4, sideColor: "#3182ce" }
-};
-
-const STORAGE_KEY = "paperstudio-settings-vector-v9";
+function loadInitialSettings() {
+  try {
+    const hash = window.location.hash.slice(1);
+    if (hash) {
+      const decoded = decodeSettings(hash);
+      if (decoded) return { ...DEFAULT_SETTINGS, ...decoded };
+    }
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
+  } catch (e) {
+    console.error(e);
+  }
+  return { ...DEFAULT_SETTINGS };
+}
 
 export default function App() {
   const canvasRef = useRef(null);
+  const viewportRef = useRef(null);
+  const renderCount = useRef(0);
+  const mountCount = useRef(0);
+  renderCount.current += 1;
+  // #region agent log
+  if (renderCount.current <= 3 || renderCount.current % 20 === 0) {
+    fetch('http://127.0.0.1:7902/ingest/c385147e-d6b8-4063-8961-f6887a43465a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'17f64e'},body:JSON.stringify({sessionId:'17f64e',location:'App.jsx:render',message:'App render',data:{renderCount:renderCount.current},hypothesisId:'C',timestamp:Date.now()})}).catch(()=>{});
+  }
+  // #endregion
+  const { state: settings, push: updateSettings, undo, redo, canUndo, canRedo } = useHistory(loadInitialSettings);
 
-  const [isDark, setIsDark] = useState(() => {
-    if (typeof window !== "undefined") {
-      return window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const [activeTab, setActiveTab] = useState("design");
+  const [activePreset, setActivePreset] = useState(null);
+  const [zoom, setZoom] = useState(100);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [toast, setToast] = useState({ visible: false, message: "", type: "success" });
+  const [cmdOpen, setCmdOpen] = useState(false);
+  const [cmdQuery, setCmdQuery] = useState("");
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [recentExports, setRecentExports] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("paperstudio-exports") || "[]");
+    } catch {
+      return [];
     }
-    return false;
   });
 
-  // Base state tracking high-density template values
-  const [spacing, setSpacing] = useState(80);
-  const [thickness, setThickness] = useState(4);
-  const [ruleColor, setRuleColor] = useState("#a0aec0");
-  const [paperColor, setPaperColor] = useState("#ffffff");
-  const [side, setSide] = useState(320);
-  const [sideWidth, setSideWidth] = useState(6);
-  const [sideColor, setSideColor] = useState("#e53e3e");
+  const set = useCallback(
+    (patch) => updateSettings((prev) => ({ ...prev, ...(typeof patch === "function" ? patch(prev) : patch) })),
+    [updateSettings]
+  );
 
-  const [copied, setCopied] = useState(false);
-  const [downloading, setDownloading] = useState(false);
-  const [showSuccess, setShowSuccess] = useState(false);
-
-  /* ---------------- LOAD SETTINGS ---------------- */
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const s = JSON.parse(saved);
-        setSpacing(s.spacing ?? 80);
-        setThickness(s.thickness ?? 4);
-        setRuleColor(s.ruleColor ?? "#a0aec0");
-        setPaperColor(s.paperColor ?? "#ffffff");
-        setSide(s.side ?? 320);
-        setSideWidth(s.sideWidth ?? 6);
-        setSideColor(s.sideColor ?? "#e53e3e");
-      }
-    } catch (e) {
-      console.error(e);
-    }
+  const showToast = useCallback((message, type = "success") => {
+    setToast({ visible: true, message, type });
+    setTimeout(() => setToast((t) => ({ ...t, visible: false })), 3000);
   }, []);
 
-  /* ---------------- SAVE SETTINGS ---------------- */
-  useEffect(() => {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ spacing, thickness, ruleColor, paperColor, side, sideWidth, sideColor })
-    );
-  }, [spacing, thickness, ruleColor, paperColor, side, sideWidth, sideColor]);
+  const stats = useMemo(() => computeStats(settings), [settings]);
 
-  /* ---------------- DRAW CANVAS PREVIEW ---------------- */
   const draw = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (canvasRef.current) drawPaper(canvasRef.current, settings);
+  }, [settings]);
 
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // Apply template background color
-    ctx.fillStyle = paperColor;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Visual ruled lines layout
-    ctx.strokeStyle = ruleColor;
-    ctx.lineWidth = thickness;
-    ctx.lineCap = "round";
-
-    for (let y = spacing; y < canvas.height; y += spacing) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(canvas.width, y);
-      ctx.stroke();
-    }
-
-    // Visual margin line layout
-    ctx.fillStyle = sideColor;
-    ctx.fillRect(side, 0, sideWidth, canvas.height);
-  }, [spacing, thickness, ruleColor, paperColor, side, sideWidth, sideColor]);
+  useEffect(() => { draw(); }, [draw]);
 
   useEffect(() => {
-    draw();
-  }, [draw]);
+    mountCount.current += 1;
+    // #region agent log
+    fetch('http://127.0.0.1:7902/ingest/c385147e-d6b8-4063-8961-f6887a43465a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'17f64e'},body:JSON.stringify({sessionId:'17f64e',location:'App.jsx:mount',message:'App mounted',data:{mountCount:mountCount.current},hypothesisId:'A',timestamp:Date.now()})}).catch(()=>{});
+    return () => {
+      fetch('http://127.0.0.1:7902/ingest/c385147e-d6b8-4063-8961-f6887a43465a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'17f64e'},body:JSON.stringify({sessionId:'17f64e',location:'App.jsx:unmount',message:'App unmounted',data:{mountCount:mountCount.current},hypothesisId:'A',timestamp:Date.now()})}).catch(()=>{});
+    };
+    // #endregion
+  }, []);
 
-  /* ---------------- RASTER DOWNLOAD (IMAGE) ---------------- */
-  const downloadPNG = async () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    setDownloading(true);
+  useEffect(() => {
+    // #region agent log
+    fetch('http://127.0.0.1:7902/ingest/c385147e-d6b8-4063-8961-f6887a43465a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'17f64e'},body:JSON.stringify({sessionId:'17f64e',location:'App.jsx:localStorage',message:'localStorage save',data:{format:settings.format,spacing:settings.spacing},hypothesisId:'D',timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+  }, [settings]);
+
+  const applyPreset = useCallback(
+    (key) => {
+      const p = PRESETS[key];
+      if (!p) return;
+      set({ ...p, format: settings.format, orientation: settings.orientation });
+      setActivePreset(key);
+      showToast(`Applied "${p.name}" template`);
+    },
+    [set, settings.format, settings.orientation, showToast]
+  );
+
+  // Native Vector SVG Generation Engine
+  const handleExportSVG = useCallback(() => {
     try {
-      const link = document.createElement("a");
-      link.download = `a4-notebook-raster-${Date.now()}.png`;
-      link.href = canvas.toDataURL("image/png", 1.0);
-      link.click();
-      setShowSuccess(true);
-      setTimeout(() => setShowSuccess(false), 2500);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setDownloading(false);
-    }
-  };
-
-  /* ---------------- TRUE VECTOR DOWNLOAD (PDF) ---------------- */
-  const downloadPDF = async () => {
-    setDownloading(true);
-    try {
-      const pdf = new jsPDF({
-        orientation: "portrait",
-        unit: "mm",
-        format: "a4",
-        compress: true
-      });
-
-      const pageWidth = 210;
-      const pageHeight = 297;
-      const scale = pageWidth / 2480;
-
-      // 1. DRAW BACKGROUND (Vector Solid Rect)
-      pdf.setFillColor(paperColor);
-      pdf.rect(0, 0, pageWidth, pageHeight, "F");
-
-      // 2. DRAW RULED LINES (Vector Calculated Paths)
-      pdf.setDrawColor(ruleColor);
-      pdf.setLineWidth(thickness * scale);
-
-      const spacingMm = spacing * scale;
-      for (let y = spacingMm; y < pageHeight; y += spacingMm) {
-        pdf.line(0, y, pageWidth, y);
+      const width = canvasRef.current?.width || 800;
+      const height = canvasRef.current?.height || 1130;
+      
+      let svgElements = [];
+      
+      // 1. Paper Background Document
+      svgElements.push(`<rect width="${width}" height="${height}" fill="${settings.paperColor}" />`);
+      
+      // 2. Margin Guideline
+      if (settings.side) {
+        svgElements.push(`  <line x1="${settings.side}" y1="0" x2="${settings.side}" y2="${height}" stroke="${settings.sideColor}" stroke-width="${settings.sideWidth}" />`);
       }
+      
+      // 3. Grid Lines / Rule Paths
+      const lineCount = stats.lineCount || Math.floor(height / settings.spacing);
+      const startY = settings.spacing;
+      
+      for (let i = 0; i < lineCount; i++) {
+        const y = startY + (i * settings.spacing);
+        if (y < height) {
+          let dashArray = "";
+          if (settings.lineStyle === "dashed") dashArray = 'stroke-dasharray="6,4"';
+          if (settings.lineStyle === "dotted") dashArray = 'stroke-dasharray="2,4"';
+          
+          svgElements.push(`  <line x1="0" y1="${y}" x2="${width}" y2="${y}" stroke="${settings.ruleColor}" stroke-width="${settings.thickness}" ${dashArray} />`);
+        }
+      }
+      
+      // 4. Vector Watermark Text
+      if (settings.watermarkText) {
+        svgElements.push(`  <text x="${width / 2}" y="${height / 2}" fill="${settings.ruleColor}" opacity="${settings.watermarkOpacity}" font-family="sans-serif" font-size="${width * 0.07}" font-weight="bold" text-anchor="middle" transform="rotate(-45 ${width / 2} ${height / 2})">${settings.watermarkText}</text>`);
+      }
+      
+      // 5. Typography Headers & Footers
+      if (settings.headerText) {
+        svgElements.push(`  <text x="${width / 2}" y="50" fill="${settings.ruleColor}" opacity="0.5" font-family="sans-serif" font-size="14" text-anchor="middle" letter-spacing="1">${settings.headerText}</text>`);
+      }
+      if (settings.footerText) {
+        svgElements.push(`  <text x="${width / 2}" y="${height - 40}" fill="${settings.ruleColor}" opacity="0.5" font-family="sans-serif" font-size="12" text-anchor="middle" letter-spacing="1">${settings.footerText}</text>`);
+      }
+      
+      const svgFullString = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">\n${svgElements.join('\n')}\n</svg>`;
+      
+      const blob = new Blob([svgFullString], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const downloadLink = document.createElement("a");
+      downloadLink.href = url;
+      downloadLink.download = `vector-blueprint-${settings.format || 'custom'}.svg`;
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
+      URL.revokeObjectURL(url);
+      
+      const entry = { type: "SVG", time: Date.now(), format: settings.format };
+      const updated = [entry, ...recentExports].slice(0, 5);
+      setRecentExports(updated);
+      localStorage.setItem("paperstudio-exports", JSON.stringify(updated));
+      
+      showToast("Scalable Vector Graphic (SVG) downloaded");
+    } catch (e) {
+      showToast("SVG Engine export failed", "error");
+    }
+  }, [settings, stats, recentExports, showToast]);
 
-      // 3. DRAW MARGIN LINE (Vector Solid Shape)
-      const marginPosMm = side * scale;
-      const marginWidthMm = sideWidth * scale;
-
-      pdf.setFillColor(sideColor);
-      pdf.rect(marginPosMm, 0, marginWidthMm, pageHeight, "F");
-
-      pdf.save(`a4-vector-notebook-${Date.now()}.pdf`);
-      setShowSuccess(true);
-      setTimeout(() => setShowSuccess(false), 2500);
-    } catch (error) {
-      console.error("Vector rendering failure:", error);
-      alert("Error compiling vector metrics.");
+  const handleExportPDF = useCallback(async () => {
+    setDownloading(true);
+    try {
+      await exportPDF(settings);
+      const entry = { type: "PDF", time: Date.now(), format: settings.format };
+      const updated = [entry, ...recentExports].slice(0, 5);
+      setRecentExports(updated);
+      localStorage.setItem("paperstudio-exports", JSON.stringify(updated));
+      showToast("Vector PDF exported successfully");
+    } catch (e) {
+      showToast("Export failed", "error");
     } finally {
       setDownloading(false);
     }
-  };
+  }, [settings, recentExports, showToast]);
 
-  /* ---------------- COPY CONFIG ---------------- */
-  const copySettings = async () => {
+  const handleExportPNG = useCallback(async () => {
+    if (!canvasRef.current) return;
+    setDownloading(true);
     try {
-      await navigator.clipboard.writeText(
-        JSON.stringify({ spacing, thickness, ruleColor, paperColor, side, sideWidth, sideColor }, null, 2)
-      );
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error(err);
+      await exportPNG(canvasRef.current);
+      showToast("High-resolution PNG saved");
+    } catch {
+      showToast("Export failed", "error");
+    } finally {
+      setDownloading(false);
     }
-  };
+  }, [showToast]);
 
-  const applyPreset = (name) => {
-    const p = PRESETS[name];
-    if (!p) return;
-    setSpacing(p.spacing);
-    setThickness(p.thickness);
-    setRuleColor(p.ruleColor);
-    setPaperColor(p.paperColor);
-    setSide(p.side);
-    setSideWidth(p.sideWidth);
-    setSideColor(p.sideColor);
-  };
+  const copyConfig = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(settings, null, 2));
+      showToast("Configuration copied to clipboard", "info");
+    } catch {
+      showToast("Copy failed", "error");
+    }
+  }, [settings, showToast]);
 
-  const resetSettings = () => applyPreset("classic");
+  const shareLink = useCallback(async () => {
+    const url = `${window.location.origin}${window.location.pathname}#${encodeSettings(settings)}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      showToast("Share link copied — send to collaborators", "info");
+    } catch {
+      showToast("Share failed", "error");
+    }
+  }, [settings, showToast]);
 
-  /* ---------------- LOCKABLE NATIVE COLOR PICKER COMPONENT ---------------- */
+  const commands = useMemo(
+    () => [
+      ...Object.entries(PRESETS).map(([key, p]) => ({
+        id: `preset-${key}`,
+        label: `Apply ${p.name}`,
+        group: "Templates",
+        icon: "◈",
+        action: () => applyPreset(key),
+      })),
+      { id: "export-pdf", label: "Export Vector PDF", group: "Export", icon: "↓", shortcut: ["⌘", "S"], action: handleExportPDF },
+      { id: "export-svg", label: "Export Scalable Vector Graphic (SVG)", group: "Export", icon: "📐", shortcut: ["⌘", "G"], action: handleExportSVG },
+      { id: "export-png", label: "Export PNG Image", group: "Export", icon: "◻", shortcut: ["⌘", "E"], action: handleExportPNG },
+      { id: "copy", label: "Copy Configuration", group: "Share", icon: "⎘", shortcut: ["⌘", "C"], action: copyConfig },
+      { id: "share", label: "Copy Share Link", group: "Share", icon: "🔗", action: shareLink },
+      { id: "undo", label: "Undo", group: "Edit", icon: "↩", shortcut: ["⌘", "Z"], action: undo },
+      { id: "redo", label: "Redo", group: "Edit", icon: "↪", shortcut: ["⌘", "⇧", "Z"], action: redo },
+      ...Object.entries(LAYOUT_MODES).map(([key, m]) => ({
+        id: `layout-${key}`,
+        label: `Switch to ${m.label}`,
+        group: "Layout",
+        icon: m.icon,
+        action: () => set({ layoutMode: key }),
+      })),
+      ...Object.entries(PAPER_FORMATS).map(([key, f]) => ({
+        id: `format-${key}`,
+        label: `Paper size ${f.label}`,
+        group: "Format",
+        icon: "▭",
+        action: () => set({ format: key }),
+      })),
+    ],
+    [applyPreset, handleExportPDF, handleExportSVG, handleExportPNG, copyConfig, shareLink, undo, redo, set]
+  );
 
+  useEffect(() => {
+    const handler = (e) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key === "k") { e.preventDefault(); setCmdOpen(true); return; }
+      if (mod && e.key === "z" && !e.shiftKey) { e.preventDefault(); undo(); return; }
+      if (mod && (e.key === "Z" || (e.key === "z" && e.shiftKey))) { e.preventDefault(); redo(); return; }
+      if (mod && e.key === "s") { e.preventDefault(); handleExportPDF(); return; }
+      if (mod && e.key === "g") { e.preventDefault(); handleExportSVG(); return; }
+      if (mod && e.key === "e") { e.preventDefault(); handleExportPNG(); return; }
+      if (mod && e.key === "c" && !e.shiftKey) { e.preventDefault(); copyConfig(); return; }
+      if (mod && e.key === "0") { e.preventDefault(); setZoom(100); return; }
+      if (mod && (e.key === "=" || e.key === "+")) { e.preventDefault(); setZoom((z) => Math.min(400, z + 25)); return; }
+      if (mod && e.key === "-") { e.preventDefault(); setZoom((z) => Math.max(25, z - 25)); return; }
+      if (e.key === "f" && !mod) { e.preventDefault(); setIsFullscreen((f) => !f); return; }
+      if (e.key === "?") { e.preventDefault(); setShortcutsOpen(true); return; }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [undo, redo, handleExportPDF, handleExportSVG, handleExportPNG, copyConfig]);
+
+  const tabs = [
+    { id: "design", label: "Design" },
+    { id: "typography", label: "Typography" },
+    { id: "export", label: "Export" },
+  ];
 
   return (
-    <div 
-      className={`h-screen w-screen overflow-hidden flex flex-col transition-colors duration-500 ${
-        isDark 
-          ? "bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-slate-900 via-zinc-950 to-black text-white" 
-          : "bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-indigo-50/40 via-slate-100 to-zinc-200/70 text-slate-900"
-      }`}
-    >
-      {/* GLOSSY HEADER BAR */}
-      <header className="h-14 flex items-center justify-between px-6 border-b border-white/20 dark:border-slate-800/40 bg-white/70 dark:bg-zinc-900/60 backdrop-blur-xl flex-shrink-0 z-10 shadow-sm shadow-slate-100/10">
-        <div className="flex flex-col">
-          <div className="font-extrabold text-sm tracking-tight bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 bg-clip-text text-transparent uppercase">
-            Paper Studio Pro
+    <div className="h-screen w-screen overflow-hidden flex flex-col bg-luxury-obsidian text-luxury-pearl relative">
+      {/* Ambient background */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="ambient-orb w-[600px] h-[600px] -top-48 -right-48 bg-luxury-gold/[0.04]" />
+        <div className="ambient-orb w-[400px] h-[400px] bottom-0 left-1/4 bg-indigo-500/[0.03]" style={{ animationDelay: "1.5s" }} />
+        <div className="absolute inset-0 noise-overlay opacity-50" />
+      </div>
+
+      {/* Header */}
+      <header className="relative h-14 flex items-center justify-between px-5 border-b border-white/[0.06] glass-panel flex-shrink-0 z-20">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-luxury-gold-light to-luxury-gold-dark flex items-center justify-center shadow-glow">
+              <span className="font-display text-luxury-obsidian text-sm font-bold">P</span>
+            </div>
+            <div>
+              <div className="font-display text-lg text-gradient-gold leading-none">Paper Studio Pro</div>
+              <div className="text-[9px] text-luxury-pearl/30 uppercase tracking-[0.25em] font-medium">Enterprise Edition</div>
+            </div>
           </div>
-          <div className="text-[9px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-widest">
-            Infinity-Zoom Vector Layout Engine
+          <div className="hidden md:flex items-center gap-1 ml-4 pl-4 border-l border-white/[0.06]">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-[10px] text-luxury-pearl/40 font-mono">VECTOR ENGINE v3.2</span>
           </div>
         </div>
 
-        <button
-          onClick={() => setIsDark(!isDark)}
-          className="text-[11px] font-bold px-3 py-1.5 rounded-xl border transition-all border-slate-200/60 dark:border-slate-800/60 bg-white/60 dark:bg-zinc-800/50 hover:bg-white dark:hover:bg-zinc-800 shadow-sm backdrop-blur-md"
-        >
-          {isDark ? "☀ LIGHT INTERFACE" : "🌙 DARK INTERFACE"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => { setCmdOpen(true); setCmdQuery(""); }}
+            className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06] text-[11px] text-luxury-pearl/40 transition-all"
+          >
+            <span>Search commands</span>
+            <span className="kbd">⌘K</span>
+          </button>
+          <button
+            onClick={() => setShortcutsOpen(true)}
+            className="luxury-btn-secondary text-[11px] px-3 py-1.5 hidden sm:block"
+          >
+            Shortcuts
+          </button>
+          <button
+            onClick={undo}
+            disabled={!canUndo}
+            className="luxury-btn-secondary text-[11px] px-2.5 py-1.5 disabled:opacity-30"
+            title="Undo"
+          >
+            ↩
+          </button>
+          <button
+            onClick={redo}
+            disabled={!canRedo}
+            className="luxury-btn-secondary text-[11px] px-2.5 py-1.5 disabled:opacity-30"
+            title="Redo"
+          >
+            ↪
+          </button>
+        </div>
       </header>
 
-      {/* CORE WORKSPACE FRAME */}
-      <div className="flex flex-1 overflow-hidden min-h-0">
+      <div className="flex flex-1 overflow-hidden min-h-0 relative z-10">
+        {/* Sidebar */}
+        {!isFullscreen && (
+          <aside
+            className={`${sidebarCollapsed ? "w-0 opacity-0" : "w-[360px] opacity-100"} flex flex-col border-r border-white/[0.06] glass-panel flex-shrink-0 transition-all duration-300 overflow-hidden`}
+          >
+            <div className="flex items-center gap-1 p-3 border-b border-white/[0.04]">
+              {tabs.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setActiveTab(t.id)}
+                  className={`tab-pill flex-1 ${activeTab === t.id ? "tab-pill-active" : "tab-pill-inactive"}`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
 
-        {/* CONTROLS SIDEBAR PANEL */}
-        <aside 
-          className="w-[330px] flex flex-col justify-between p-5 border-r border-white/10 dark:border-slate-800/40 bg-white/40 dark:bg-zinc-900/30 backdrop-blur-xl h-full flex-shrink-0 shadow-lg"
-        >
-          <div className="space-y-4.5">
-            {/* Template Profile Presets */}
-            <div>
-              <div className="text-[10px] uppercase font-black tracking-widest text-slate-400 dark:text-slate-500 mb-2">
-                A4 Profiles
+            <div className="flex-1 overflow-y-auto inspector-scroll p-4 space-y-5">
+              {activeTab === "design" && (
+                <>
+                  {/* Presets */}
+                  <section>
+                    <div className="section-label mb-3">Curated Templates</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {Object.entries(PRESETS).map(([key, p]) => (
+                        <button
+                          key={key}
+                          onClick={() => applyPreset(key)}
+                          className={`preset-card ${activePreset === key ? "preset-card-active" : ""}`}
+                        >
+                          <div className="text-[9px] uppercase tracking-wider text-luxury-gold/50 mb-0.5">{p.tag}</div>
+                          <div className="text-xs font-medium text-luxury-pearl/90">{p.name}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+
+                  <div className="h-px bg-white/[0.04]" />
+
+                  {/* Format & Layout */}
+                  <section className="space-y-3">
+                    <div className="section-label">Document Format</div>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {Object.entries(PAPER_FORMATS).map(([key, f]) => (
+                        <button
+                          key={key}
+                          onClick={() => set({ format: key })}
+                          className={`text-[10px] py-2 rounded-lg border transition-all ${
+                            settings.format === key
+                              ? "border-luxury-gold/40 bg-luxury-gold/10 text-luxury-gold-light"
+                              : "border-white/[0.06] text-luxury-pearl/40 hover:border-white/[0.12]"
+                          }`}
+                        >
+                          {f.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex gap-2">
+                      {["portrait", "landscape"].map((o) => (
+                        <button
+                          key={o}
+                          onClick={() => set({ orientation: o })}
+                          className={`flex-1 text-[11px] py-2 rounded-lg border capitalize transition-all ${
+                            settings.orientation === o
+                              ? "border-luxury-gold/40 bg-luxury-gold/10 text-luxury-gold-light"
+                              : "border-white/[0.06] text-luxury-pearl/40 hover:border-white/[0.12]"
+                          }`}
+                        >
+                          {o}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+
+                  <div className="h-px bg-white/[0.04]" />
+
+                  {/* Layout modes */}
+                  <section className="space-y-3">
+                    <div className="section-label">Layout Engine</div>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {Object.entries(LAYOUT_MODES).map(([key, m]) => (
+                        <button
+                          key={key}
+                          onClick={() => set({ layoutMode: key })}
+                          title={m.description}
+                          className={`flex flex-col items-center gap-1 py-2.5 rounded-lg border transition-all ${
+                            settings.layoutMode === key
+                              ? "border-luxury-gold/40 bg-luxury-gold/10 text-luxury-gold-light"
+                              : "border-white/[0.06] text-luxury-pearl/40 hover:border-white/[0.12]"
+                          }`}
+                        >
+                          <span className="text-base">{m.icon}</span>
+                          <span className="text-[9px]">{m.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+
+                  <div className="h-px bg-white/[0.04]" />
+
+                  {/* Rule params */}
+                  <section className="space-y-4">
+                    <div className="section-label">Rule Parameters</div>
+                    <PremiumSlider label="Line Spacing" value={settings.spacing} onChange={(v) => set({ spacing: v })} min={20} max={300} unit="px" />
+                    <PremiumSlider label="Line Weight" value={settings.thickness} onChange={(v) => set({ thickness: v })} min={1} max={20} step={0.5} />
+                    <div className="flex gap-1.5">
+                      {Object.entries(LINE_STYLES).map(([key, s]) => (
+                        <button
+                          key={key}
+                          onClick={() => set({ lineStyle: key })}
+                          className={`flex-1 text-[10px] py-2 rounded-lg border transition-all ${
+                            settings.lineStyle === key
+                              ? "border-luxury-gold/40 bg-luxury-gold/10 text-luxury-gold-light"
+                              : "border-white/[0.06] text-luxury-pearl/40"
+                          }`}
+                        >
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <StableColorPicker label="Line Color" value={settings.ruleColor} onChange={(v) => set({ ruleColor: v })} />
+                      <StableColorPicker label="Paper Color" value={settings.paperColor} onChange={(v) => set({ paperColor: v })} />
+                    </div>
+                  </section>
+
+                  <div className="h-px bg-white/[0.04]" />
+
+                  {/* Margin */}
+                  <section className="space-y-4">
+                    <div className="section-label">Margin Guidelines</div>
+                    <PremiumSlider label="Margin Position" value={settings.side} onChange={(v) => set({ side: v })} min={80} max={1200} />
+                    <PremiumSlider label="Margin Width" value={settings.sideWidth} onChange={(v) => set({ sideWidth: v })} min={1} max={40} />
+                    <StableColorPicker label="Margin Color" value={settings.sideColor} onChange={(v) => set({ sideColor: v })} />
+                  </section>
+                </>
+              )}
+
+              {activeTab === "typography" && (
+                <>
+                  <section className="space-y-4">
+                    <div className="section-label">Header & Footer</div>
+                    <div className="space-y-2">
+                      <label className="text-[11px] text-luxury-pearl/50">Header Text</label>
+                      <input
+                        value={settings.headerText}
+                        onChange={(e) => set({ headerText: e.target.value })}
+                        placeholder="Document title, chapter name..."
+                        className="w-full px-3 py-2.5 rounded-xl bg-white/[0.03] border border-white/[0.06] text-sm text-luxury-pearl/80 placeholder:text-luxury-pearl/20 outline-none focus:border-luxury-gold/30"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[11px] text-luxury-pearl/50">Footer Text</label>
+                      <input
+                        value={settings.footerText}
+                        onChange={(e) => set({ footerText: e.target.value })}
+                        placeholder="Page numbers, copyright, date..."
+                        className="w-full px-3 py-2.5 rounded-xl bg-white/[0.03] border border-white/[0.06] text-sm text-luxury-pearl/80 placeholder:text-luxury-pearl/20 outline-none focus:border-luxury-gold/30"
+                      />
+                    </div>
+                  </section>
+
+                  <div className="h-px bg-white/[0.04]" />
+
+                  <section className="space-y-4">
+                    <div className="section-label">Watermark</div>
+                    <div className="space-y-2">
+                      <label className="text-[11px] text-luxury-pearl/50">Watermark Text</label>
+                      <input
+                        value={settings.watermarkText}
+                        onChange={(e) => set({ watermarkText: e.target.value })}
+                        placeholder="CONFIDENTIAL, DRAFT, Brand name..."
+                        className="w-full px-3 py-2.5 rounded-xl bg-white/[0.03] border border-white/[0.06] text-sm text-luxury-pearl/80 placeholder:text-luxury-pearl/20 outline-none focus:border-luxury-gold/30"
+                      />
+                    </div>
+                    <PremiumSlider
+                      label="Watermark Opacity"
+                      value={Math.round(settings.watermarkOpacity * 100)}
+                      onChange={(v) => set({ watermarkOpacity: v / 100 })}
+                      min={2}
+                      max={30}
+                      format={(v) => `${v}%`}
+                    />
+                  </section>
+                </>
+              )}
+
+              {activeTab === "export" && (
+                <>
+                  <section className="space-y-4">
+                    <div className="section-label">Export Quality</div>
+                    <div className="space-y-2">
+                      {Object.entries(EXPORT_QUALITIES).map(([key, q]) => (
+                        <button
+                          key={key}
+                          onClick={() => set({ exportQuality: key })}
+                          className={`w-full flex items-center justify-between p-3 rounded-xl border transition-all ${
+                            settings.exportQuality === key
+                              ? "border-luxury-gold/40 bg-luxury-gold/10"
+                              : "border-white/[0.06] hover:border-white/[0.12]"
+                          }`}
+                        >
+                          <div className="text-left">
+                            <div className="text-sm text-luxury-pearl/80">{q.label}</div>
+                            <div className="text-[10px] text-luxury-pearl/30">{q.dpi} DPI</div>
+                          </div>
+                          <span className="text-[9px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-luxury-gold/15 text-luxury-gold/80">
+                            {q.badge}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+
+                  <div className="h-px bg-white/[0.04]" />
+
+                  <section className="space-y-4">
+                    <div className="section-label">Multi-Page Export</div>
+                    <PremiumSlider
+                      label="Page Count"
+                      value={settings.pageCount}
+                      onChange={(v) => set({ pageCount: v })}
+                      min={1}
+                      max={100}
+                      format={(v) => `${v} page${v > 1 ? "s" : ""}`}
+                    />
+                  </section>
+
+                  <div className="h-px bg-white/[0.04]" />
+
+                  {recentExports.length > 0 && (
+                    <section>
+                      <div className="section-label mb-3">Recent Exports</div>
+                      <div className="space-y-1.5">
+                        {recentExports.map((e, i) => (
+                          <div key={i} className="flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.02] border border-white/[0.04]">
+                            <span className="text-[11px] text-luxury-pearl/50">{e.type} · {PAPER_FORMATS[e.format]?.label}</span>
+                            <span className="text-[10px] font-mono text-luxury-pearl/25">
+                              {new Date(e.time).toLocaleTimeString()}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Sidebar footer actions */}
+            <div className="p-4 border-t border-white/[0.04] space-y-2 flex-shrink-0">
+              <button
+                onClick={handleExportPDF}
+                disabled={downloading}
+                className="luxury-btn-primary w-full text-xs uppercase tracking-[0.15em] disabled:opacity-50"
+              >
+                {downloading ? "Rendering Vector Paths..." : "Export Vector PDF"}
+              </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={handleExportPNG} className="luxury-btn-secondary text-[11px]">Save PNG</button>
+                <button 
+                  onClick={handleExportSVG} 
+                  className="luxury-btn-secondary text-[11px] border-luxury-gold/30 text-luxury-gold-light hover:bg-luxury-gold/5"
+                >
+                  Export SVG
+                </button>
               </div>
               <div className="grid grid-cols-2 gap-2">
-                {Object.keys(PRESETS).map((p) => (
-                  <button
-                    key={p}
-                    onClick={() => applyPreset(p)}
-                    className="text-xs font-bold py-2 bg-white/60 dark:bg-zinc-900/50 hover:bg-indigo-600 hover:text-white dark:hover:bg-indigo-600 dark:hover:text-white rounded-xl capitalize border border-slate-200/50 dark:border-slate-800/50 shadow-sm transition-all duration-300 transform active:scale-95 text-center"
-                  >
-                    {p}
-                  </button>
-                ))}
+                <button onClick={copyConfig} className="luxury-btn-secondary text-[11px]">Copy Config</button>
+                <button onClick={() => applyPreset("executive")} className="luxury-btn-secondary text-[11px]">Reset</button>
               </div>
             </div>
+          </aside>
+        )}
 
-            <div className="h-px bg-slate-200/50 dark:bg-slate-800/40" />
+        {/* Collapse toggle */}
+        {!isFullscreen && (
+          <button
+            onClick={() => setSidebarCollapsed((c) => !c)}
+            className="absolute left-0 top-1/2 -translate-y-1/2 z-30 w-5 h-12 rounded-r-lg glass-panel border border-l-0 border-white/[0.06] flex items-center justify-center text-luxury-pearl/30 hover:text-luxury-gold transition-all"
+            style={{ left: sidebarCollapsed ? 0 : 360 }}
+          >
+            {sidebarCollapsed ? "›" : "‹"}
+          </button>
+        )}
 
-            {/* Matrix Rule Parameters */}
-            <div className="space-y-3.5">
-              <div className="text-[10px] uppercase font-black tracking-widest text-slate-400 dark:text-slate-500">
-                Rule Parameters
-              </div>
-              
-              <div className="space-y-1.5">
-                <div className="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Line Spacing</div>
-                <div className="flex items-center gap-4 bg-slate-500/5 dark:bg-slate-400/5 px-3 py-2 rounded-xl border border-slate-200/40 dark:border-slate-700/30 backdrop-blur-md">
-                  <input type="range" min={30} max={300} step={1} value={spacing} onChange={(e) => setSpacing(Number(e.target.value))} className="w-full accent-indigo-500 h-1 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer" />
-                  <div className="text-xs w-8 text-right font-mono font-bold">{spacing}</div>
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <div className="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Line Weight</div>
-                <div className="flex items-center gap-4 bg-slate-500/5 dark:bg-slate-400/5 px-3 py-2 rounded-xl border border-slate-200/40 dark:border-slate-700/30 backdrop-blur-md">
-                  <input type="range" min={1} max={20} step={0.5} value={thickness} onChange={(e) => setThickness(Number(e.target.value))} className="w-full accent-indigo-500 h-1 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer" />
-                  <div className="text-xs w-8 text-right font-mono font-bold">{thickness}</div>
-                </div>
-              </div>
-
-              {/* Secure, Full-Spectrum Color Pickers */}
-              <div className="grid grid-cols-2 gap-3">
-                <StableColorPicker label="Line Tint" value={ruleColor} onChange={setRuleColor} />
-                <StableColorPicker label="Paper Base" value={paperColor} onChange={setPaperColor} />
-              </div>
+        {/* Main viewport */}
+        <main ref={viewportRef} className="flex-1 flex flex-col overflow-hidden min-w-0">
+          {/* Toolbar */}
+          <div className="flex items-center justify-between px-4 py-2 border-b border-white/[0.04] glass-panel flex-shrink-0">
+            <div className="flex items-center gap-3">
+              <span className="text-[10px] uppercase tracking-wider text-luxury-pearl/30">Live Preview</span>
+              <span className="text-[10px] font-mono text-luxury-gold/50">{stats.pageSize}</span>
             </div>
-
-            <div className="h-px bg-slate-200/50 dark:bg-slate-800/40" />
-
-            {/* Margin Alignment Configuration */}
-            <div className="space-y-3.5">
-              <div className="text-[10px] uppercase font-black tracking-widest text-slate-400 dark:text-slate-500">
-                Margin Guidelines
-              </div>
-              
-              <div className="space-y-1.5">
-                <div className="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Margin Position</div>
-                <div className="flex items-center gap-4 bg-slate-500/5 dark:bg-slate-400/5 px-3 py-2 rounded-xl border border-slate-200/40 dark:border-slate-700/30 backdrop-blur-md">
-                  <input type="range" min={100} max={1000} step={1} value={side} onChange={(e) => setSide(Number(e.target.value))} className="w-full accent-indigo-500 h-1 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer" />
-                  <div className="text-xs w-8 text-right font-mono font-bold">{side}</div>
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <div className="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Margin Width</div>
-                <div className="flex items-center gap-4 bg-slate-500/5 dark:bg-slate-400/5 px-3 py-2 rounded-xl border border-slate-200/40 dark:border-slate-700/30 backdrop-blur-md">
-                  <input type="range" min={1} max={40} step={1} value={sideWidth} onChange={(e) => setSideWidth(Number(e.target.value))} className="w-full accent-indigo-500 h-1 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer" />
-                  <div className="text-xs w-8 text-right font-mono font-bold">{sideWidth}</div>
-                </div>
-              </div>
-
-              <StableColorPicker label="Margin Tint" value={sideColor} onChange={setSideColor} />
+            <div className="flex items-center gap-2">
+              <button onClick={() => setZoom((z) => Math.max(25, z - 25))} className="kbd cursor-pointer hover:bg-white/10">−</button>
+              <span className="text-[11px] font-mono text-luxury-pearl/50 w-12 text-center">{zoom}%</span>
+              <button onClick={() => setZoom((z) => Math.min(400, z + 25))} className="kbd cursor-pointer hover:bg-white/10">+</button>
+              <button onClick={() => setZoom(100)} className="luxury-btn-secondary text-[10px] px-2 py-1 ml-1">Fit</button>
+              <button onClick={() => setIsFullscreen((f) => !f)} className="luxury-btn-secondary text-[10px] px-2 py-1">
+                {isFullscreen ? "Exit" : "Fullscreen"}
+              </button>
             </div>
           </div>
 
-          {/* Sticky Actions Footer Panel */}
-          <div className="pt-4 space-y-2 flex-shrink-0">
-            <button 
-              onClick={downloadPDF} 
-              disabled={downloading}
-              className="w-full px-4 py-3.5 text-xs font-black rounded-2xl bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 hover:from-indigo-600 hover:to-pink-600 disabled:opacity-50 text-white shadow-xl shadow-indigo-500/20 hover:shadow-indigo-500/30 transition-all duration-300 uppercase tracking-widest active:scale-[0.98]"
+          {/* Canvas area */}
+          <div className="flex-1 flex items-center justify-center p-6 overflow-auto inspector-scroll relative">
+            <div
+              className="relative transition-transform duration-300 ease-out"
+              style={{ transform: `scale(${zoom / 100})`, transformOrigin: "center center" }}
             >
-              {downloading ? "Compiling Paths..." : "Export Vector PDF"}
-            </button>
-
-            <div className="grid grid-cols-2 gap-2">
-              <button 
-                onClick={downloadPNG} 
-                className="w-full text-xs py-2 font-bold bg-white/60 dark:bg-zinc-800/40 hover:bg-white dark:hover:bg-zinc-800 border border-slate-200/60 dark:border-slate-800/60 rounded-xl transition-all shadow-sm active:scale-95 text-slate-700 dark:text-slate-200"
-              >
-                Save Image
-              </button>
-              <button 
-                onClick={copySettings} 
-                className="w-full text-xs py-2 font-bold bg-white/60 dark:bg-zinc-800/40 hover:bg-white dark:hover:bg-zinc-800 border border-slate-200/60 dark:border-slate-800/60 rounded-xl transition-all shadow-sm active:scale-95 text-slate-700 dark:text-slate-200"
-              >
-                {copied ? "Copied ✓" : "Copy Config"}
-              </button>
+              <canvas
+                ref={canvasRef}
+                width={stats.width || 800}
+                height={stats.height || 1130}
+                className="shadow-luxury-lg rounded-sm object-contain max-h-[calc(100vh-8rem)] max-w-full"
+                style={{ backgroundColor: settings.paperColor }}
+              />
+              {/* Paper edge highlight */}
+              <div className="absolute inset-0 rounded-sm pointer-events-none ring-1 ring-black/10" />
             </div>
-
-            <button 
-              onClick={resetSettings} 
-              className="w-full text-[10px] font-bold pt-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 text-center transition-colors uppercase tracking-widest"
-            >
-              Reset to Factory Classic
-            </button>
           </div>
-        </aside>
 
-        {/* WORKSPACE PREVIEW BACKGROUND VIEWPORT */}
-        <main className="flex-1 flex items-center justify-center p-8 overflow-hidden z-0">
-          <div className="max-h-full max-w-full flex items-center justify-center relative">
-            <canvas
-              ref={canvasRef}
-              width={2480}
-              height={3508}
-              className="max-h-[calc(100vh-6rem)] max-w-full w-auto h-auto shadow-[0_25px_60px_-15px_rgba(0,0,0,0.3)] border border-slate-200/50 dark:border-zinc-900/60 rounded-lg object-contain transition-all duration-500 ease-out"
-              style={{ backgroundColor: paperColor }}
-            />
+          {/* Status bar */}
+          <div className="flex items-center justify-between px-4 py-2 border-t border-white/[0.04] glass-panel flex-shrink-0 text-[10px] font-mono">
+            <div className="flex items-center gap-4 text-luxury-pearl/30">
+              <span>Lines: <span className="text-luxury-gold-light/70">{stats.lineCount}</span></span>
+              <span>Spacing: <span className="text-luxury-gold-light/70">{stats.spacingMm}mm</span></span>
+              <span>Margin: <span className="text-luxury-gold-light/70">{stats.marginMm}mm</span></span>
+            </div>
+            <div className="flex items-center gap-4 text-luxury-pearl/30">
+              <span>{stats.pixelSize}px</span>
+              <span>{LAYOUT_MODES[settings.layoutMode]?.label}</span>
+              <span className="text-luxury-gold/40">{EXPORT_QUALITIES[settings.exportQuality]?.label}</span>
+            </div>
           </div>
         </main>
       </div>
 
-      {/* SUCCESS POPUP NOTIFICATION */}
-      {showSuccess && (
-        <div className="absolute bottom-6 right-6 bg-emerald-500/90 text-white font-bold px-4 py-2.5 rounded-2xl text-xs shadow-xl backdrop-blur-md tracking-wide animate-bounce border border-emerald-400/30">
-          Successfully Generated Vector Template! ✓
-        </div>
-      )}
+      <CommandPalette
+        open={cmdOpen}
+        onClose={() => { setCmdOpen(false); setCmdQuery(""); }}
+        commands={commands}
+        query={cmdQuery}
+        setQuery={setCmdQuery}
+      />
+      <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      <Toast {...toast} />
     </div>
   );
 }
