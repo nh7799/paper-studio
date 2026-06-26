@@ -22,6 +22,7 @@ import {
   encodeSettings,
   decodeSettings,
 } from "./paperEngine";
+import jsPDF from "jspdf";
 
 function loadInitialSettings() {
   try {
@@ -44,11 +45,27 @@ export default function App() {
   const renderCount = useRef(0);
   const mountCount = useRef(0);
   renderCount.current += 1;
-  // #region agent log
+
+  // #region agent log – render
   if (renderCount.current <= 3 || renderCount.current % 20 === 0) {
-    fetch('http://127.0.0.1:7902/ingest/c385147e-d6b8-4063-8961-f6887a43465a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'17f64e'},body:JSON.stringify({sessionId:'17f64e',location:'App.jsx:render',message:'App render',data:{renderCount:renderCount.current},hypothesisId:'C',timestamp:Date.now()})}).catch(()=>{});
+    fetch("http://127.0.0.1:7902/ingest/c385147e-d6b8-4063-8961-f6887a43465a", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "17f64e",
+      },
+      body: JSON.stringify({
+        sessionId: "17f64e",
+        location: "App.jsx:render",
+        message: "App render",
+        data: { renderCount: renderCount.current },
+        hypothesisId: "C",
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
   }
   // #endregion
+
   const { state: settings, push: updateSettings, undo, redo, canUndo, canRedo } = useHistory(loadInitialSettings);
 
   const [activeTab, setActiveTab] = useState("design");
@@ -85,21 +102,68 @@ export default function App() {
     if (canvasRef.current) drawPaper(canvasRef.current, settings);
   }, [settings]);
 
-  useEffect(() => { draw(); }, [draw]);
+  useEffect(() => {
+    draw();
+  }, [draw]);
 
   useEffect(() => {
     mountCount.current += 1;
-    // #region agent log
-    fetch('http://127.0.0.1:7902/ingest/c385147e-d6b8-4063-8961-f6887a43465a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'17f64e'},body:JSON.stringify({sessionId:'17f64e',location:'App.jsx:mount',message:'App mounted',data:{mountCount:mountCount.current},hypothesisId:'A',timestamp:Date.now()})}).catch(()=>{});
-    return () => {
-      fetch('http://127.0.0.1:7902/ingest/c385147e-d6b8-4063-8961-f6887a43465a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'17f64e'},body:JSON.stringify({sessionId:'17f64e',location:'App.jsx:unmount',message:'App unmounted',data:{mountCount:mountCount.current},hypothesisId:'A',timestamp:Date.now()})}).catch(()=>{});
-    };
+    // #region agent log – mount
+    fetch("http://127.0.0.1:7902/ingest/c385147e-d6b8-4063-8961-f6887a43465a", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "17f64e",
+      },
+      body: JSON.stringify({
+        sessionId: "17f64e",
+        location: "App.jsx:mount",
+        message: "App mounted",
+        data: { mountCount: mountCount.current },
+        hypothesisId: "A",
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
     // #endregion
+
+    return () => {
+      // #region agent log – unmount
+      fetch("http://127.0.0.1:7902/ingest/c385147e-d6b8-4063-8961-f6887a43465a", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Debug-Session-Id": "17f64e",
+        },
+        body: JSON.stringify({
+          sessionId: "17f64e",
+          location: "App.jsx:unmount",
+          message: "App unmounted",
+          data: { mountCount: mountCount.current },
+          hypothesisId: "A",
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+    };
   }, []);
 
   useEffect(() => {
-    // #region agent log
-    fetch('http://127.0.0.1:7902/ingest/c385147e-d6b8-4063-8961-f6887a43465a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'17f64e'},body:JSON.stringify({sessionId:'17f64e',location:'App.jsx:localStorage',message:'localStorage save',data:{format:settings.format,spacing:settings.spacing},hypothesisId:'D',timestamp:Date.now()})}).catch(()=>{});
+    // #region agent log – localStorage save
+    fetch("http://127.0.0.1:7902/ingest/c385147e-d6b8-4063-8961-f6887a43465a", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "17f64e",
+      },
+      body: JSON.stringify({
+        sessionId: "17f64e",
+        location: "App.jsx:localStorage",
+        message: "localStorage save",
+        data: { format: settings.format, spacing: settings.spacing },
+        hypothesisId: "D",
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
     // #endregion
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
   }, [settings]);
@@ -120,83 +184,131 @@ export default function App() {
     try {
       const width = canvasRef.current?.width || 800;
       const height = canvasRef.current?.height || 1130;
-      
+
       let svgElements = [];
-      
+
       // 1. Paper Background Document
       svgElements.push(`<rect width="${width}" height="${height}" fill="${settings.paperColor}" />`);
-      
+
       // 2. Margin Guideline
       if (settings.side) {
-        svgElements.push(`  <line x1="${settings.side}" y1="0" x2="${settings.side}" y2="${height}" stroke="${settings.sideColor}" stroke-width="${settings.sideWidth}" />`);
+        svgElements.push(
+          `  <line x1="${settings.side}" y1="0" x2="${settings.side}" y2="${height}" stroke="${settings.sideColor}" stroke-width="${settings.sideWidth}" />`
+        );
       }
-      
+
       // 3. Grid Lines / Rule Paths
       const lineCount = stats.lineCount || Math.floor(height / settings.spacing);
       const startY = settings.spacing;
-      
+
       for (let i = 0; i < lineCount; i++) {
-        const y = startY + (i * settings.spacing);
+        const y = startY + i * settings.spacing;
         if (y < height) {
           let dashArray = "";
           if (settings.lineStyle === "dashed") dashArray = 'stroke-dasharray="6,4"';
           if (settings.lineStyle === "dotted") dashArray = 'stroke-dasharray="2,4"';
-          
-          svgElements.push(`  <line x1="0" y1="${y}" x2="${width}" y2="${y}" stroke="${settings.ruleColor}" stroke-width="${settings.thickness}" ${dashArray} />`);
+
+          svgElements.push(
+            `  <line x1="0" y1="${y}" x2="${width}" y2="${y}" stroke="${settings.ruleColor}" stroke-width="${settings.thickness}" ${dashArray} />`
+          );
         }
       }
-      
+
       // 4. Vector Watermark Text
       if (settings.watermarkText) {
-        svgElements.push(`  <text x="${width / 2}" y="${height / 2}" fill="${settings.ruleColor}" opacity="${settings.watermarkOpacity}" font-family="sans-serif" font-size="${width * 0.07}" font-weight="bold" text-anchor="middle" transform="rotate(-45 ${width / 2} ${height / 2})">${settings.watermarkText}</text>`);
+        svgElements.push(
+          `  <text x="${width / 2}" y="${height / 2}" fill="${settings.ruleColor}" opacity="${settings.watermarkOpacity}" font-family="sans-serif" font-size="${width * 0.07}" font-weight="bold" text-anchor="middle" transform="rotate(-45 ${width / 2} ${height / 2})">${settings.watermarkText}</text>`
+        );
       }
-      
+
       // 5. Typography Headers & Footers
       if (settings.headerText) {
-        svgElements.push(`  <text x="${width / 2}" y="50" fill="${settings.ruleColor}" opacity="0.5" font-family="sans-serif" font-size="14" text-anchor="middle" letter-spacing="1">${settings.headerText}</text>`);
+        svgElements.push(
+          `  <text x="${width / 2}" y="50" fill="${settings.ruleColor}" opacity="0.5" font-family="sans-serif" font-size="14" text-anchor="middle" letter-spacing="1">${settings.headerText}</text>`
+        );
       }
       if (settings.footerText) {
-        svgElements.push(`  <text x="${width / 2}" y="${height - 40}" fill="${settings.ruleColor}" opacity="0.5" font-family="sans-serif" font-size="12" text-anchor="middle" letter-spacing="1">${settings.footerText}</text>`);
+        svgElements.push(
+          `  <text x="${width / 2}" y="${height - 40}" fill="${settings.ruleColor}" opacity="0.5" font-family="sans-serif" font-size="12" text-anchor="middle" letter-spacing="1">${settings.footerText}</text>`
+        );
       }
-      
-      const svgFullString = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">\n${svgElements.join('\n')}\n</svg>`;
-      
+
+      const svgFullString = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">\n${svgElements.join("\n")}\n</svg>`;
+
       const blob = new Blob([svgFullString], { type: "image/svg+xml;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const downloadLink = document.createElement("a");
       downloadLink.href = url;
-      downloadLink.download = `vector-blueprint-${settings.format || 'custom'}.svg`;
+      downloadLink.download = `vector-blueprint-${settings.format || "custom"}.svg`;
       document.body.appendChild(downloadLink);
       downloadLink.click();
       document.body.removeChild(downloadLink);
       URL.revokeObjectURL(url);
-      
+
       const entry = { type: "SVG", time: Date.now(), format: settings.format };
       const updated = [entry, ...recentExports].slice(0, 5);
       setRecentExports(updated);
       localStorage.setItem("paperstudio-exports", JSON.stringify(updated));
-      
+
       showToast("Scalable Vector Graphic (SVG) downloaded");
     } catch (e) {
       showToast("SVG Engine export failed", "error");
     }
   }, [settings, stats, recentExports, showToast]);
 
+  // FIXED PDF export using jsPDF to capture canvas
   const handleExportPDF = useCallback(async () => {
+    if (!canvasRef.current) {
+      showToast("Canvas not ready", "error");
+      return;
+    }
     setDownloading(true);
     try {
-      await exportPDF(settings);
+      // Ensure the canvas is up-to-date
+      draw();
+
+      const canvas = canvasRef.current;
+      const width = stats.width || 800;
+      const height = stats.height || 1130;
+
+      // Get image data from canvas
+      const imgData = canvas.toDataURL("image/png");
+
+      // Create PDF with the correct page size and orientation
+      const pdf = new jsPDF({
+        orientation: settings.orientation === "landscape" ? "landscape" : "portrait",
+        unit: "px",
+        format: [width, height],
+        compress: true,
+      });
+
+      // Add the image to the first page (it will fill the whole page)
+      pdf.addImage(imgData, "PNG", 0, 0, width, height);
+
+      // Multi-page export: duplicate the same content for each additional page
+      const pageCount = settings.pageCount || 1;
+      for (let i = 1; i < pageCount; i++) {
+        pdf.addPage([width, height], settings.orientation === "landscape" ? "landscape" : "portrait");
+        pdf.addImage(imgData, "PNG", 0, 0, width, height);
+      }
+
+      // Save the PDF
+      pdf.save(`paper-${settings.format || "custom"}.pdf`);
+
+      // Update recent exports
       const entry = { type: "PDF", time: Date.now(), format: settings.format };
       const updated = [entry, ...recentExports].slice(0, 5);
       setRecentExports(updated);
       localStorage.setItem("paperstudio-exports", JSON.stringify(updated));
-      showToast("Vector PDF exported successfully");
+
+      showToast(`PDF exported successfully (${pageCount} page${pageCount > 1 ? "s" : ""})`);
     } catch (e) {
-      showToast("Export failed", "error");
+      console.error(e);
+      showToast("PDF export failed", "error");
     } finally {
       setDownloading(false);
     }
-  }, [settings, recentExports, showToast]);
+  }, [settings, stats, draw, recentExports, showToast]);
 
   const handleExportPNG = useCallback(async () => {
     if (!canvasRef.current) return;
@@ -239,11 +351,45 @@ export default function App() {
         icon: "◈",
         action: () => applyPreset(key),
       })),
-      { id: "export-pdf", label: "Export Vector PDF", group: "Export", icon: "↓", shortcut: ["⌘", "S"], action: handleExportPDF },
-      { id: "export-svg", label: "Export Scalable Vector Graphic (SVG)", group: "Export", icon: "📐", shortcut: ["⌘", "G"], action: handleExportSVG },
-      { id: "export-png", label: "Export PNG Image", group: "Export", icon: "◻", shortcut: ["⌘", "E"], action: handleExportPNG },
-      { id: "copy", label: "Copy Configuration", group: "Share", icon: "⎘", shortcut: ["⌘", "C"], action: copyConfig },
-      { id: "share", label: "Copy Share Link", group: "Share", icon: "🔗", action: shareLink },
+      {
+        id: "export-pdf",
+        label: "Export Vector PDF",
+        group: "Export",
+        icon: "↓",
+        shortcut: ["⌘", "S"],
+        action: handleExportPDF,
+      },
+      {
+        id: "export-svg",
+        label: "Export Scalable Vector Graphic (SVG)",
+        group: "Export",
+        icon: "📐",
+        shortcut: ["⌘", "G"],
+        action: handleExportSVG,
+      },
+      {
+        id: "export-png",
+        label: "Export PNG Image",
+        group: "Export",
+        icon: "◻",
+        shortcut: ["⌘", "E"],
+        action: handleExportPNG,
+      },
+      {
+        id: "copy",
+        label: "Copy Configuration",
+        group: "Share",
+        icon: "⎘",
+        shortcut: ["⌘", "C"],
+        action: copyConfig,
+      },
+      {
+        id: "share",
+        label: "Copy Share Link",
+        group: "Share",
+        icon: "🔗",
+        action: shareLink,
+      },
       { id: "undo", label: "Undo", group: "Edit", icon: "↩", shortcut: ["⌘", "Z"], action: undo },
       { id: "redo", label: "Redo", group: "Edit", icon: "↪", shortcut: ["⌘", "⇧", "Z"], action: redo },
       ...Object.entries(LAYOUT_MODES).map(([key, m]) => ({
@@ -267,18 +413,66 @@ export default function App() {
   useEffect(() => {
     const handler = (e) => {
       const mod = e.metaKey || e.ctrlKey;
-      if (mod && e.key === "k") { e.preventDefault(); setCmdOpen(true); return; }
-      if (mod && e.key === "z" && !e.shiftKey) { e.preventDefault(); undo(); return; }
-      if (mod && (e.key === "Z" || (e.key === "z" && e.shiftKey))) { e.preventDefault(); redo(); return; }
-      if (mod && e.key === "s") { e.preventDefault(); handleExportPDF(); return; }
-      if (mod && e.key === "g") { e.preventDefault(); handleExportSVG(); return; }
-      if (mod && e.key === "e") { e.preventDefault(); handleExportPNG(); return; }
-      if (mod && e.key === "c" && !e.shiftKey) { e.preventDefault(); copyConfig(); return; }
-      if (mod && e.key === "0") { e.preventDefault(); setZoom(100); return; }
-      if (mod && (e.key === "=" || e.key === "+")) { e.preventDefault(); setZoom((z) => Math.min(400, z + 25)); return; }
-      if (mod && e.key === "-") { e.preventDefault(); setZoom((z) => Math.max(25, z - 25)); return; }
-      if (e.key === "f" && !mod) { e.preventDefault(); setIsFullscreen((f) => !f); return; }
-      if (e.key === "?") { e.preventDefault(); setShortcutsOpen(true); return; }
+      if (mod && e.key === "k") {
+        e.preventDefault();
+        setCmdOpen(true);
+        return;
+      }
+      if (mod && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      if (mod && (e.key === "Z" || (e.key === "z" && e.shiftKey))) {
+        e.preventDefault();
+        redo();
+        return;
+      }
+      if (mod && e.key === "s") {
+        e.preventDefault();
+        handleExportPDF();
+        return;
+      }
+      if (mod && e.key === "g") {
+        e.preventDefault();
+        handleExportSVG();
+        return;
+      }
+      if (mod && e.key === "e") {
+        e.preventDefault();
+        handleExportPNG();
+        return;
+      }
+      if (mod && e.key === "c" && !e.shiftKey) {
+        e.preventDefault();
+        copyConfig();
+        return;
+      }
+      if (mod && e.key === "0") {
+        e.preventDefault();
+        setZoom(100);
+        return;
+      }
+      if (mod && (e.key === "=" || e.key === "+")) {
+        e.preventDefault();
+        setZoom((z) => Math.min(400, z + 25));
+        return;
+      }
+      if (mod && e.key === "-") {
+        e.preventDefault();
+        setZoom((z) => Math.max(25, z - 25));
+        return;
+      }
+      if (e.key === "f" && !mod) {
+        e.preventDefault();
+        setIsFullscreen((f) => !f);
+        return;
+      }
+      if (e.key === "?") {
+        e.preventDefault();
+        setShortcutsOpen(true);
+        return;
+      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
@@ -295,7 +489,10 @@ export default function App() {
       {/* Ambient background */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="ambient-orb w-[600px] h-[600px] -top-48 -right-48 bg-luxury-gold/[0.04]" />
-        <div className="ambient-orb w-[400px] h-[400px] bottom-0 left-1/4 bg-indigo-500/[0.03]" style={{ animationDelay: "1.5s" }} />
+        <div
+          className="ambient-orb w-[400px] h-[400px] bottom-0 left-1/4 bg-indigo-500/[0.03]"
+          style={{ animationDelay: "1.5s" }}
+        />
         <div className="absolute inset-0 noise-overlay opacity-50" />
       </div>
 
@@ -308,7 +505,9 @@ export default function App() {
             </div>
             <div>
               <div className="font-display text-lg text-gradient-gold leading-none">Paper Studio Pro</div>
-              <div className="text-[9px] text-luxury-pearl/30 uppercase tracking-[0.25em] font-medium">Enterprise Edition</div>
+              <div className="text-[9px] text-luxury-pearl/30 uppercase tracking-[0.25em] font-medium">
+                Enterprise Edition
+              </div>
             </div>
           </div>
           <div className="hidden md:flex items-center gap-1 ml-4 pl-4 border-l border-white/[0.06]">
@@ -319,7 +518,10 @@ export default function App() {
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => { setCmdOpen(true); setCmdQuery(""); }}
+            onClick={() => {
+              setCmdOpen(true);
+              setCmdQuery("");
+            }}
             className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06] text-[11px] text-luxury-pearl/40 transition-all"
           >
             <span>Search commands</span>
@@ -354,7 +556,9 @@ export default function App() {
         {/* Sidebar */}
         {!isFullscreen && (
           <aside
-            className={`${sidebarCollapsed ? "w-0 opacity-0" : "w-[360px] opacity-100"} flex flex-col border-r border-white/[0.06] glass-panel flex-shrink-0 transition-all duration-300 overflow-hidden`}
+            className={`${
+              sidebarCollapsed ? "w-0 opacity-0" : "w-[360px] opacity-100"
+            } flex flex-col border-r border-white/[0.06] glass-panel flex-shrink-0 transition-all duration-300 overflow-hidden`}
           >
             <div className="flex items-center gap-1 p-3 border-b border-white/[0.04]">
               {tabs.map((t) => (
@@ -381,7 +585,9 @@ export default function App() {
                           onClick={() => applyPreset(key)}
                           className={`preset-card ${activePreset === key ? "preset-card-active" : ""}`}
                         >
-                          <div className="text-[9px] uppercase tracking-wider text-luxury-gold/50 mb-0.5">{p.tag}</div>
+                          <div className="text-[9px] uppercase tracking-wider text-luxury-gold/50 mb-0.5">
+                            {p.tag}
+                          </div>
                           <div className="text-xs font-medium text-luxury-pearl/90">{p.name}</div>
                         </button>
                       ))}
@@ -454,8 +660,22 @@ export default function App() {
                   {/* Rule params */}
                   <section className="space-y-4">
                     <div className="section-label">Rule Parameters</div>
-                    <PremiumSlider label="Line Spacing" value={settings.spacing} onChange={(v) => set({ spacing: v })} min={20} max={300} unit="px" />
-                    <PremiumSlider label="Line Weight" value={settings.thickness} onChange={(v) => set({ thickness: v })} min={1} max={20} step={0.5} />
+                    <PremiumSlider
+                      label="Line Spacing"
+                      value={settings.spacing}
+                      onChange={(v) => set({ spacing: v })}
+                      min={20}
+                      max={300}
+                      unit="px"
+                    />
+                    <PremiumSlider
+                      label="Line Weight"
+                      value={settings.thickness}
+                      onChange={(v) => set({ thickness: v })}
+                      min={1}
+                      max={20}
+                      step={0.5}
+                    />
                     <div className="flex gap-1.5">
                       {Object.entries(LINE_STYLES).map(([key, s]) => (
                         <button
@@ -472,8 +692,16 @@ export default function App() {
                       ))}
                     </div>
                     <div className="grid grid-cols-2 gap-3">
-                      <StableColorPicker label="Line Color" value={settings.ruleColor} onChange={(v) => set({ ruleColor: v })} />
-                      <StableColorPicker label="Paper Color" value={settings.paperColor} onChange={(v) => set({ paperColor: v })} />
+                      <StableColorPicker
+                        label="Line Color"
+                        value={settings.ruleColor}
+                        onChange={(v) => set({ ruleColor: v })}
+                      />
+                      <StableColorPicker
+                        label="Paper Color"
+                        value={settings.paperColor}
+                        onChange={(v) => set({ paperColor: v })}
+                      />
                     </div>
                   </section>
 
@@ -482,9 +710,25 @@ export default function App() {
                   {/* Margin */}
                   <section className="space-y-4">
                     <div className="section-label">Margin Guidelines</div>
-                    <PremiumSlider label="Margin Position" value={settings.side} onChange={(v) => set({ side: v })} min={80} max={1200} />
-                    <PremiumSlider label="Margin Width" value={settings.sideWidth} onChange={(v) => set({ sideWidth: v })} min={1} max={40} />
-                    <StableColorPicker label="Margin Color" value={settings.sideColor} onChange={(v) => set({ sideColor: v })} />
+                    <PremiumSlider
+                      label="Margin Position"
+                      value={settings.side}
+                      onChange={(v) => set({ side: v })}
+                      min={80}
+                      max={1200}
+                    />
+                    <PremiumSlider
+                      label="Margin Width"
+                      value={settings.sideWidth}
+                      onChange={(v) => set({ sideWidth: v })}
+                      min={1}
+                      max={40}
+                    />
+                    <StableColorPicker
+                      label="Margin Color"
+                      value={settings.sideColor}
+                      onChange={(v) => set({ sideColor: v })}
+                    />
                   </section>
                 </>
               )}
@@ -586,8 +830,13 @@ export default function App() {
                       <div className="section-label mb-3">Recent Exports</div>
                       <div className="space-y-1.5">
                         {recentExports.map((e, i) => (
-                          <div key={i} className="flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.02] border border-white/[0.04]">
-                            <span className="text-[11px] text-luxury-pearl/50">{e.type} · {PAPER_FORMATS[e.format]?.label}</span>
+                          <div
+                            key={i}
+                            className="flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.02] border border-white/[0.04]"
+                          >
+                            <span className="text-[11px] text-luxury-pearl/50">
+                              {e.type} · {PAPER_FORMATS[e.format]?.label}
+                            </span>
                             <span className="text-[10px] font-mono text-luxury-pearl/25">
                               {new Date(e.time).toLocaleTimeString()}
                             </span>
@@ -610,17 +859,23 @@ export default function App() {
                 {downloading ? "Rendering Vector Paths..." : "Export Vector PDF"}
               </button>
               <div className="grid grid-cols-2 gap-2">
-                <button onClick={handleExportPNG} className="luxury-btn-secondary text-[11px]">Save PNG</button>
-                <button 
-                  onClick={handleExportSVG} 
+                <button onClick={handleExportPNG} className="luxury-btn-secondary text-[11px]">
+                  Save PNG
+                </button>
+                <button
+                  onClick={handleExportSVG}
                   className="luxury-btn-secondary text-[11px] border-luxury-gold/30 text-luxury-gold-light hover:bg-luxury-gold/5"
                 >
                   Export SVG
                 </button>
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <button onClick={copyConfig} className="luxury-btn-secondary text-[11px]">Copy Config</button>
-                <button onClick={() => applyPreset("executive")} className="luxury-btn-secondary text-[11px]">Reset</button>
+                <button onClick={copyConfig} className="luxury-btn-secondary text-[11px]">
+                  Copy Config
+                </button>
+                <button onClick={() => applyPreset("executive")} className="luxury-btn-secondary text-[11px]">
+                  Reset
+                </button>
               </div>
             </div>
           </aside>
@@ -646,11 +901,26 @@ export default function App() {
               <span className="text-[10px] font-mono text-luxury-gold/50">{stats.pageSize}</span>
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={() => setZoom((z) => Math.max(25, z - 25))} className="kbd cursor-pointer hover:bg-white/10">−</button>
+              <button
+                onClick={() => setZoom((z) => Math.max(25, z - 25))}
+                className="kbd cursor-pointer hover:bg-white/10"
+              >
+                −
+              </button>
               <span className="text-[11px] font-mono text-luxury-pearl/50 w-12 text-center">{zoom}%</span>
-              <button onClick={() => setZoom((z) => Math.min(400, z + 25))} className="kbd cursor-pointer hover:bg-white/10">+</button>
-              <button onClick={() => setZoom(100)} className="luxury-btn-secondary text-[10px] px-2 py-1 ml-1">Fit</button>
-              <button onClick={() => setIsFullscreen((f) => !f)} className="luxury-btn-secondary text-[10px] px-2 py-1">
+              <button
+                onClick={() => setZoom((z) => Math.min(400, z + 25))}
+                className="kbd cursor-pointer hover:bg-white/10"
+              >
+                +
+              </button>
+              <button onClick={() => setZoom(100)} className="luxury-btn-secondary text-[10px] px-2 py-1 ml-1">
+                Fit
+              </button>
+              <button
+                onClick={() => setIsFullscreen((f) => !f)}
+                className="luxury-btn-secondary text-[10px] px-2 py-1"
+              >
                 {isFullscreen ? "Exit" : "Fullscreen"}
               </button>
             </div>
@@ -677,9 +947,15 @@ export default function App() {
           {/* Status bar */}
           <div className="flex items-center justify-between px-4 py-2 border-t border-white/[0.04] glass-panel flex-shrink-0 text-[10px] font-mono">
             <div className="flex items-center gap-4 text-luxury-pearl/30">
-              <span>Lines: <span className="text-luxury-gold-light/70">{stats.lineCount}</span></span>
-              <span>Spacing: <span className="text-luxury-gold-light/70">{stats.spacingMm}mm</span></span>
-              <span>Margin: <span className="text-luxury-gold-light/70">{stats.marginMm}mm</span></span>
+              <span>
+                Lines: <span className="text-luxury-gold-light/70">{stats.lineCount}</span>
+              </span>
+              <span>
+                Spacing: <span className="text-luxury-gold-light/70">{stats.spacingMm}mm</span>
+              </span>
+              <span>
+                Margin: <span className="text-luxury-gold-light/70">{stats.marginMm}mm</span>
+              </span>
             </div>
             <div className="flex items-center gap-4 text-luxury-pearl/30">
               <span>{stats.pixelSize}px</span>
@@ -692,7 +968,10 @@ export default function App() {
 
       <CommandPalette
         open={cmdOpen}
-        onClose={() => { setCmdOpen(false); setCmdQuery(""); }}
+        onClose={() => {
+          setCmdOpen(false);
+          setCmdQuery("");
+        }}
         commands={commands}
         query={cmdQuery}
         setQuery={setCmdQuery}
