@@ -1,0 +1,50 @@
+{
+  "name": "paper-studio",
+  "version": "1.0.0",
+  "description": "Design and download custom ruled paper for printing",
+  "author": "Paper Studio",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "echo 'Add your linter here'",
+    "type-check": "tsc --noEmit",
+    "format": "echo 'Add your formatter here'"
+  },
+  "keywords": [
+    "paper",
+    "ruled",
+    "notebook",
+    "printing",
+    "design",
+    "PDF",
+    "PNG"
+  ],
+  "homepage": "https://paperstudio.app",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/paper-studio"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/paper-studio/issues"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "jspdf": "^2.5.1"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "tailwindcss": "^3.4.10",
+    "postcss": "^8.4.41",
+    "autoprefixer": "^10.4.20"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  }
+}
