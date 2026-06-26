@@ -1800,3 +1800,31 @@
 {"sessionId":"17f64e","location":"useHistory.js:push","message":"Settings push","data":{"prevType":"object","index":7,"nextKeys":13,"historyLen":8},"hypothesisId":"B","timestamp":1782463527285}
 {"sessionId":"17f64e","location":"App.jsx:render","message":"App render","data":{"renderCount":20},"hypothesisId":"C","timestamp":1782463527285}
 {"sessionId":"17f64e","location":"App.jsx:localStorage","message":"localStorage save","data":{"format":"a3","spacing":80},"hypothesisId":"D","timestamp":1782463527289}
+{"sessionId":"17f64e","location":"main.jsx:boot","message":"App boot","data":{"href":"https://paper-studio-beta.vercel.app/","perfNavType":"navigate"},"hypothesisId":"A","timestamp":1782463628412}
+{"sessionId":"17f64e","location":"App.jsx:render","message":"App render","data":{"renderCount":1},"hypothesisId":"C","timestamp":1782463628419}
+{"sessionId":"17f64e","location":"useHistory.js:init","message":"History init","data":{"initialStateType":"function","history0Type":"function","stateType":"object","stateKeys":["spacing","thickness","ruleColor","paperColor","side","sideWidth","sideColor","format"]},"hypothesisId":"B","timestamp":1782463628420}
+{"sessionId":"17f64e","location":"App.jsx:mount","message":"App mounted","data":{"mountCount":1},"hypothesisId":"A","timestamp":1782463628447}
+{"sessionId":"17f64e","location":"App.jsx:localStorage","message":"localStorage save","data":{"format":"a3","spacing":80},"hypothesisId":"D","timestamp":1782463628447}
+{"sessionId":"17f64e","location":"useHistory.js:push","message":"Settings push","data":{"prevType":"function","index":0,"nextKeys":1,"historyLen":1},"hypothesisId":"B","timestamp":1782463630867}
+{"sessionId":"17f64e","location":"App.jsx:render","message":"App render","data":{"renderCount":2},"hypothesisId":"C","timestamp":1782463630868}
+{"sessionId":"17f64e","location":"App.jsx:localStorage","message":"localStorage save","data":{"format":"a5"},"hypothesisId":"D","timestamp":1782463630872}
+{"sessionId":"17f64e","location":"main.jsx:boot","message":"App boot","data":{"href":"https://paper-studio-beta.vercel.app/","perfNavType":"navigate"},"hypothesisId":"A","timestamp":1782463642576}
+{"sessionId":"17f64e","location":"App.jsx:render","message":"App render","data":{"renderCount":1},"hypothesisId":"C","timestamp":1782463642584}
+{"sessionId":"17f64e","location":"useHistory.js:init","message":"History init","data":{"initialStateType":"function","history0Type":"function","stateType":"object","stateKeys":["spacing","thickness","ruleColor","paperColor","side","sideWidth","sideColor","format"]},"hypothesisId":"B","timestamp":1782463642585}
+{"sessionId":"17f64e","location":"App.jsx:mount","message":"App mounted","data":{"mountCount":1},"hypothesisId":"A","timestamp":1782463642727}
+{"sessionId":"17f64e","location":"App.jsx:localStorage","message":"localStorage save","data":{"format":"a5","spacing":80},"hypothesisId":"D","timestamp":1782463642727}
+{"sessionId":"17f64e","location":"useHistory.js:push","message":"Settings push","data":{"prevType":"function","index":0,"nextKeys":1,"historyLen":1},"hypothesisId":"B","timestamp":1782463645101}
+{"sessionId":"17f64e","location":"App.jsx:render","message":"App render","data":{"renderCount":2},"hypothesisId":"C","timestamp":1782463645102}
+{"sessionId":"17f64e","location":"App.jsx:localStorage","message":"localStorage save","data":{"format":"a3"},"hypothesisId":"D","timestamp":1782463645106}
+{"sessionId":"17f64e","location":"useHistory.js:push","message":"Settings push","data":{"prevType":"object","index":1,"nextKeys":1,"historyLen":2},"hypothesisId":"B","timestamp":1782463645734}
+{"sessionId":"17f64e","location":"App.jsx:render","message":"App render","data":{"renderCount":3},"hypothesisId":"C","timestamp":1782463645734}
+{"sessionId":"17f64e","location":"App.jsx:localStorage","message":"localStorage save","data":{"format":"legal"},"hypothesisId":"D","timestamp":1782463645737}
+{"sessionId":"17f64e","location":"useHistory.js:push","message":"Settings push","data":{"prevType":"object","index":2,"nextKeys":1,"historyLen":3},"hypothesisId":"B","timestamp":1782463646234}
+{"sessionId":"17f64e","location":"App.jsx:localStorage","message":"localStorage save","data":{"format":"a4"},"hypothesisId":"D","timestamp":1782463646236}
+{"sessionId":"17f64e","location":"main.jsx:hmr","message":"Vite HMR error","data":{"err":"[object Object]"},"hypothesisId":"A","timestamp":1782463733952}
+{"sessionId":"17f64e","location":"main.jsx:hmr","message":"Vite full reload triggered","data":{},"hypothesisId":"A","timestamp":1782463742478}
+{"sessionId":"17f64e","location":"main.jsx:boot","message":"App boot","data":{"href":"http://localhost:5173/","perfNavType":"reload"},"hypothesisId":"A","timestamp":1782463742937}
+{"sessionId":"17f64e","location":"useHistory.js:init","message":"History init","data":{"initialStateType":"function","history0Type":"function","stateType":"object","stateKeys":["spacing","thickness","ruleColor","paperColor","side","sideWidth","sideColor","format"]},"hypothesisId":"B","timestamp":1782463742943}
+{"sessionId":"17f64e","location":"useHistory.js:init","message":"History init","data":{"initialStateType":"function","history0Type":"function","stateType":"object","stateKeys":["spacing","thickness","ruleColor","paperColor","side","sideWidth","sideColor","format"]},"hypothesisId":"B","timestamp":1782463742945}
+{"sessionId":"17f64e","location":"useHistory.js:init","message":"History init","data":{"initialStateType":"function","history0Type":"function","stateType":"object","stateKeys":["spacing","thickness","ruleColor","paperColor","side","sideWidth","sideColor","format"]},"hypothesisId":"B","timestamp":1782463752546}
+{"sessionId":"17f64e","location":"useHistory.js:init","message":"History init","data":{"initialStateType":"function","history0Type":"function","stateType":"object","stateKeys":["spacing","thickness","ruleColor","paperColor","side","sideWidth","sideColor","format"]},"hypothesisId":"B","timestamp":1782463752551}

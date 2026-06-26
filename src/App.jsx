@@ -17,7 +17,6 @@ import {
 import {
   drawPaper,
   computeStats,
-  exportPDF,
   exportPNG,
   encodeSettings,
   decodeSettings,
@@ -34,7 +33,7 @@ function loadInitialSettings() {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
   } catch (e) {
-    console.error(e);
+    console.error("Settings load error:", e);
   }
   return { ...DEFAULT_SETTINGS };
 }
@@ -43,37 +42,26 @@ export default function App() {
   const canvasRef = useRef(null);
   const viewportRef = useRef(null);
   const renderCount = useRef(0);
-  const mountCount = useRef(0);
-  renderCount.current += 1;
 
-  // #region agent log – render
-  if (renderCount.current <= 3 || renderCount.current % 20 === 0) {
-    fetch("http://127.0.0.1:7902/ingest/c385147e-d6b8-4063-8961-f6887a43465a", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "17f64e",
-      },
-      body: JSON.stringify({
-        sessionId: "17f64e",
-        location: "App.jsx:render",
-        message: "App render",
-        data: { renderCount: renderCount.current },
-        hypothesisId: "C",
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-  }
-  // #endregion
-
-  const { state: settings, push: updateSettings, undo, redo, canUndo, canRedo } = useHistory(loadInitialSettings);
+  const {
+    state: settings,
+    push: updateSettings,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+  } = useHistory(loadInitialSettings);
 
   const [activeTab, setActiveTab] = useState("design");
   const [activePreset, setActivePreset] = useState(null);
   const [zoom, setZoom] = useState(100);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const [toast, setToast] = useState({ visible: false, message: "", type: "success" });
+  const [toast, setToast] = useState({
+    visible: false,
+    message: "",
+    type: "success",
+  });
   const [cmdOpen, setCmdOpen] = useState(false);
   const [cmdQuery, setCmdQuery] = useState("");
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -87,8 +75,12 @@ export default function App() {
   });
 
   const set = useCallback(
-    (patch) => updateSettings((prev) => ({ ...prev, ...(typeof patch === "function" ? patch(prev) : patch) })),
-    [updateSettings]
+    (patch) =>
+      updateSettings((prev) => ({
+        ...prev,
+        ...(typeof patch === "function" ? patch(prev) : patch),
+      })),
+    [updateSettings],
   );
 
   const showToast = useCallback((message, type = "success") => {
@@ -96,9 +88,25 @@ export default function App() {
     setTimeout(() => setToast((t) => ({ ...t, visible: false })), 3000);
   }, []);
 
-  const stats = useMemo(() => computeStats(settings), [settings]);
+  const stats = useMemo(() => {
+    try {
+      return computeStats(settings);
+    } catch (e) {
+      console.error("computeStats error:", e);
+      // Fallback stats
+      return {
+        width: 800,
+        height: 1130,
+        lineCount: 20,
+        spacingMm: 5,
+        marginMm: 10,
+        pageSize: "Custom",
+        pixelSize: "800×1130",
+      };
+    }
+  }, [settings]);
 
-  // Defensive draw: catches errors from drawPaper and falls back to a safe render
+  // Safe drawing function
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -107,16 +115,16 @@ export default function App() {
     const h = canvas.height;
     if (!w || !h) return;
 
-    // Always start with a clean canvas filled with paperColor
-    ctx.fillStyle = settings.paperColor;
+    // Always clear and fill with paper color
+    ctx.fillStyle = settings.paperColor || "#ffffff";
     ctx.fillRect(0, 0, w, h);
 
     try {
       drawPaper(canvas, settings);
     } catch (e) {
       console.error("drawPaper error:", e);
-      // Fallback: draw a simple grid so the user sees something
-      ctx.strokeStyle = settings.ruleColor;
+      // Fallback: draw a basic grid
+      ctx.strokeStyle = settings.ruleColor || "#cccccc";
       ctx.lineWidth = settings.thickness || 1;
       const spacing = settings.spacing || 50;
       for (let y = spacing; y < h; y += spacing) {
@@ -125,16 +133,15 @@ export default function App() {
         ctx.lineTo(w, y);
         ctx.stroke();
       }
-      // Draw margin line if defined
       if (settings.side && settings.side < w) {
-        ctx.strokeStyle = settings.sideColor;
+        ctx.strokeStyle = settings.sideColor || "#999999";
         ctx.lineWidth = settings.sideWidth || 2;
         ctx.beginPath();
         ctx.moveTo(settings.side, 0);
         ctx.lineTo(settings.side, h);
         ctx.stroke();
       }
-      showToast("Rendering engine recovered – check console for details", "info");
+      showToast("Rendering recovered – see console", "info");
     }
   }, [settings, showToast]);
 
@@ -142,65 +149,8 @@ export default function App() {
     draw();
   }, [draw]);
 
+  // Save settings to localStorage
   useEffect(() => {
-    mountCount.current += 1;
-    // #region agent log – mount
-    fetch("http://127.0.0.1:7902/ingest/c385147e-d6b8-4063-8961-f6887a43465a", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "17f64e",
-      },
-      body: JSON.stringify({
-        sessionId: "17f64e",
-        location: "App.jsx:mount",
-        message: "App mounted",
-        data: { mountCount: mountCount.current },
-        hypothesisId: "A",
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-
-    return () => {
-      // #region agent log – unmount
-      fetch("http://127.0.0.1:7902/ingest/c385147e-d6b8-4063-8961-f6887a43465a", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Debug-Session-Id": "17f64e",
-        },
-        body: JSON.stringify({
-          sessionId: "17f64e",
-          location: "App.jsx:unmount",
-          message: "App unmounted",
-          data: { mountCount: mountCount.current },
-          hypothesisId: "A",
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
-    };
-  }, []);
-
-  useEffect(() => {
-    // #region agent log – localStorage save
-    fetch("http://127.0.0.1:7902/ingest/c385147e-d6b8-4063-8961-f6887a43465a", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "17f64e",
-      },
-      body: JSON.stringify({
-        sessionId: "17f64e",
-        location: "App.jsx:localStorage",
-        message: "localStorage save",
-        data: { format: settings.format, spacing: settings.spacing },
-        hypothesisId: "D",
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
   }, [settings]);
 
@@ -212,80 +162,72 @@ export default function App() {
       setActivePreset(key);
       showToast(`Applied "${p.name}" template`);
     },
-    [set, settings.format, settings.orientation, showToast]
+    [set, settings.format, settings.orientation, showToast],
   );
 
-  // SVG Export (unchanged, works)
+  // ---- SVG Export ----
   const handleExportSVG = useCallback(() => {
     try {
       const width = canvasRef.current?.width || 800;
       const height = canvasRef.current?.height || 1130;
-
-      let svgElements = [];
-
-      svgElements.push(`<rect width="${width}" height="${height}" fill="${settings.paperColor}" />`);
-
+      const lines = [];
+      lines.push(
+        `<rect width="${width}" height="${height}" fill="${settings.paperColor}" />`,
+      );
       if (settings.side) {
-        svgElements.push(
-          `  <line x1="${settings.side}" y1="0" x2="${settings.side}" y2="${height}" stroke="${settings.sideColor}" stroke-width="${settings.sideWidth}" />`
+        lines.push(
+          `<line x1="${settings.side}" y1="0" x2="${settings.side}" y2="${height}" stroke="${settings.sideColor}" stroke-width="${settings.sideWidth}" />`,
         );
       }
-
-      const lineCount = stats.lineCount || Math.floor(height / settings.spacing);
-      const startY = settings.spacing;
+      const lineCount =
+        stats.lineCount || Math.floor(height / settings.spacing);
       for (let i = 0; i < lineCount; i++) {
-        const y = startY + i * settings.spacing;
+        const y = settings.spacing + i * settings.spacing;
         if (y < height) {
-          let dashArray = "";
-          if (settings.lineStyle === "dashed") dashArray = 'stroke-dasharray="6,4"';
-          if (settings.lineStyle === "dotted") dashArray = 'stroke-dasharray="2,4"';
-          svgElements.push(
-            `  <line x1="0" y1="${y}" x2="${width}" y2="${y}" stroke="${settings.ruleColor}" stroke-width="${settings.thickness}" ${dashArray} />`
+          let dash = "";
+          if (settings.lineStyle === "dashed") dash = 'stroke-dasharray="6,4"';
+          if (settings.lineStyle === "dotted") dash = 'stroke-dasharray="2,4"';
+          lines.push(
+            `<line x1="0" y1="${y}" x2="${width}" y2="${y}" stroke="${settings.ruleColor}" stroke-width="${settings.thickness}" ${dash} />`,
           );
         }
       }
-
       if (settings.watermarkText) {
-        svgElements.push(
-          `  <text x="${width / 2}" y="${height / 2}" fill="${settings.ruleColor}" opacity="${settings.watermarkOpacity}" font-family="sans-serif" font-size="${width * 0.07}" font-weight="bold" text-anchor="middle" transform="rotate(-45 ${width / 2} ${height / 2})">${settings.watermarkText}</text>`
+        lines.push(
+          `<text x="${width / 2}" y="${height / 2}" fill="${settings.ruleColor}" opacity="${settings.watermarkOpacity}" font-family="sans-serif" font-size="${width * 0.07}" font-weight="bold" text-anchor="middle" transform="rotate(-45 ${width / 2} ${height / 2})">${settings.watermarkText}</text>`,
         );
       }
-
       if (settings.headerText) {
-        svgElements.push(
-          `  <text x="${width / 2}" y="50" fill="${settings.ruleColor}" opacity="0.5" font-family="sans-serif" font-size="14" text-anchor="middle" letter-spacing="1">${settings.headerText}</text>`
+        lines.push(
+          `<text x="${width / 2}" y="50" fill="${settings.ruleColor}" opacity="0.5" font-family="sans-serif" font-size="14" text-anchor="middle" letter-spacing="1">${settings.headerText}</text>`,
         );
       }
       if (settings.footerText) {
-        svgElements.push(
-          `  <text x="${width / 2}" y="${height - 40}" fill="${settings.ruleColor}" opacity="0.5" font-family="sans-serif" font-size="12" text-anchor="middle" letter-spacing="1">${settings.footerText}</text>`
+        lines.push(
+          `<text x="${width / 2}" y="${height - 40}" fill="${settings.ruleColor}" opacity="0.5" font-family="sans-serif" font-size="12" text-anchor="middle" letter-spacing="1">${settings.footerText}</text>`,
         );
       }
-
-      const svgFullString = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">\n${svgElements.join("\n")}\n</svg>`;
-
-      const blob = new Blob([svgFullString], { type: "image/svg+xml;charset=utf-8" });
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">\n${lines.join("\n")}\n</svg>`;
+      const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
       const url = URL.createObjectURL(blob);
-      const downloadLink = document.createElement("a");
-      downloadLink.href = url;
-      downloadLink.download = `vector-blueprint-${settings.format || "custom"}.svg`;
-      document.body.appendChild(downloadLink);
-      downloadLink.click();
-      document.body.removeChild(downloadLink);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `paper-${settings.format || "custom"}.svg`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
       URL.revokeObjectURL(url);
 
       const entry = { type: "SVG", time: Date.now(), format: settings.format };
-      const updated = [entry, ...recentExports].slice(0, 5);
-      setRecentExports(updated);
-      localStorage.setItem("paperstudio-exports", JSON.stringify(updated));
-
-      showToast("Scalable Vector Graphic (SVG) downloaded");
+      setRecentExports((prev) => [entry, ...prev].slice(0, 5));
+      showToast("SVG downloaded");
     } catch (e) {
+      console.error(e);
       showToast("SVG export failed", "error");
     }
-  }, [settings, stats, recentExports, showToast]);
+  }, [settings, stats, showToast]);
 
-  // Fixed PDF export with jsPDF (handles multi‑page)
+  // ---- PDF Export (fixed) ----
   const handleExportPDF = useCallback(async () => {
     if (!canvasRef.current) {
       showToast("Canvas not ready", "error");
@@ -293,53 +235,50 @@ export default function App() {
     }
     setDownloading(true);
     try {
-      draw(); // ensure latest content
-
+      draw(); // refresh canvas
       const canvas = canvasRef.current;
       const width = stats.width || 800;
       const height = stats.height || 1130;
-
       const imgData = canvas.toDataURL("image/png");
 
       const pdf = new jsPDF({
-        orientation: settings.orientation === "landscape" ? "landscape" : "portrait",
+        orientation:
+          settings.orientation === "landscape" ? "landscape" : "portrait",
         unit: "px",
         format: [width, height],
         compress: true,
       });
-
       pdf.addImage(imgData, "PNG", 0, 0, width, height);
 
       const pageCount = settings.pageCount || 1;
       for (let i = 1; i < pageCount; i++) {
-        pdf.addPage([width, height], settings.orientation === "landscape" ? "landscape" : "portrait");
+        pdf.addPage(
+          [width, height],
+          settings.orientation === "landscape" ? "landscape" : "portrait",
+        );
         pdf.addImage(imgData, "PNG", 0, 0, width, height);
       }
-
       pdf.save(`paper-${settings.format || "custom"}.pdf`);
 
       const entry = { type: "PDF", time: Date.now(), format: settings.format };
-      const updated = [entry, ...recentExports].slice(0, 5);
-      setRecentExports(updated);
-      localStorage.setItem("paperstudio-exports", JSON.stringify(updated));
-
-      showToast(`PDF exported successfully (${pageCount} page${pageCount > 1 ? "s" : ""})`);
+      setRecentExports((prev) => [entry, ...prev].slice(0, 5));
+      showToast(`PDF exported (${pageCount} page${pageCount > 1 ? "s" : ""})`);
     } catch (e) {
       console.error(e);
       showToast("PDF export failed", "error");
     } finally {
       setDownloading(false);
     }
-  }, [settings, stats, draw, recentExports, showToast]);
+  }, [settings, stats, draw, showToast]);
 
   const handleExportPNG = useCallback(async () => {
     if (!canvasRef.current) return;
     setDownloading(true);
     try {
       await exportPNG(canvasRef.current);
-      showToast("High-resolution PNG saved");
+      showToast("PNG saved");
     } catch {
-      showToast("Export failed", "error");
+      showToast("PNG export failed", "error");
     } finally {
       setDownloading(false);
     }
@@ -348,7 +287,7 @@ export default function App() {
   const copyConfig = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(JSON.stringify(settings, null, 2));
-      showToast("Configuration copied to clipboard", "info");
+      showToast("Config copied", "info");
     } catch {
       showToast("Copy failed", "error");
     }
@@ -358,12 +297,13 @@ export default function App() {
     const url = `${window.location.origin}${window.location.pathname}#${encodeSettings(settings)}`;
     try {
       await navigator.clipboard.writeText(url);
-      showToast("Share link copied — send to collaborators", "info");
+      showToast("Share link copied", "info");
     } catch {
       showToast("Share failed", "error");
     }
   }, [settings, showToast]);
 
+  // Command palette items
   const commands = useMemo(
     () => [
       ...Object.entries(PRESETS).map(([key, p]) => ({
@@ -375,7 +315,7 @@ export default function App() {
       })),
       {
         id: "export-pdf",
-        label: "Export Vector PDF",
+        label: "Export PDF",
         group: "Export",
         icon: "↓",
         shortcut: ["⌘", "S"],
@@ -383,7 +323,7 @@ export default function App() {
       },
       {
         id: "export-svg",
-        label: "Export Scalable Vector Graphic (SVG)",
+        label: "Export SVG",
         group: "Export",
         icon: "📐",
         shortcut: ["⌘", "G"],
@@ -391,7 +331,7 @@ export default function App() {
       },
       {
         id: "export-png",
-        label: "Export PNG Image",
+        label: "Export PNG",
         group: "Export",
         icon: "◻",
         shortcut: ["⌘", "E"],
@@ -399,7 +339,7 @@ export default function App() {
       },
       {
         id: "copy",
-        label: "Copy Configuration",
+        label: "Copy Config",
         group: "Share",
         icon: "⎘",
         shortcut: ["⌘", "C"],
@@ -412,8 +352,22 @@ export default function App() {
         icon: "🔗",
         action: shareLink,
       },
-      { id: "undo", label: "Undo", group: "Edit", icon: "↩", shortcut: ["⌘", "Z"], action: undo },
-      { id: "redo", label: "Redo", group: "Edit", icon: "↪", shortcut: ["⌘", "⇧", "Z"], action: redo },
+      {
+        id: "undo",
+        label: "Undo",
+        group: "Edit",
+        icon: "↩",
+        shortcut: ["⌘", "Z"],
+        action: undo,
+      },
+      {
+        id: "redo",
+        label: "Redo",
+        group: "Edit",
+        icon: "↪",
+        shortcut: ["⌘", "⇧", "Z"],
+        action: redo,
+      },
       ...Object.entries(LAYOUT_MODES).map(([key, m]) => ({
         id: `layout-${key}`,
         label: `Switch to ${m.label}`,
@@ -429,7 +383,17 @@ export default function App() {
         action: () => set({ format: key }),
       })),
     ],
-    [applyPreset, handleExportPDF, handleExportSVG, handleExportPNG, copyConfig, shareLink, undo, redo, set]
+    [
+      applyPreset,
+      handleExportPDF,
+      handleExportSVG,
+      handleExportPNG,
+      copyConfig,
+      shareLink,
+      undo,
+      redo,
+      set,
+    ],
   );
 
   // Keyboard shortcuts
@@ -499,7 +463,14 @@ export default function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [undo, redo, handleExportPDF, handleExportSVG, handleExportPNG, copyConfig]);
+  }, [
+    undo,
+    redo,
+    handleExportPDF,
+    handleExportSVG,
+    handleExportPNG,
+    copyConfig,
+  ]);
 
   const tabs = [
     { id: "design", label: "Design" },
@@ -507,7 +478,7 @@ export default function App() {
     { id: "export", label: "Export" },
   ];
 
-  // Ensure we always have valid dimensions
+  // Safe canvas dimensions
   const canvasWidth = stats.width && stats.width > 0 ? stats.width : 800;
   const canvasHeight = stats.height && stats.height > 0 ? stats.height : 1130;
 
@@ -528,10 +499,14 @@ export default function App() {
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-luxury-gold-light to-luxury-gold-dark flex items-center justify-center shadow-glow">
-              <span className="font-display text-luxury-obsidian text-sm font-bold">P</span>
+              <span className="font-display text-luxury-obsidian text-sm font-bold">
+                P
+              </span>
             </div>
             <div>
-              <div className="font-display text-lg text-gradient-gold leading-none">Paper Studio Pro</div>
+              <div className="font-display text-lg text-gradient-gold leading-none">
+                Paper Studio Pro
+              </div>
               <div className="text-[9px] text-luxury-pearl/30 uppercase tracking-[0.25em] font-medium">
                 Enterprise Edition
               </div>
@@ -539,10 +514,11 @@ export default function App() {
           </div>
           <div className="hidden md:flex items-center gap-1 ml-4 pl-4 border-l border-white/[0.06]">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-[10px] text-luxury-pearl/40 font-mono">VECTOR ENGINE v3.2</span>
+            <span className="text-[10px] text-luxury-pearl/40 font-mono">
+              VECTOR ENGINE v3.2
+            </span>
           </div>
         </div>
-
         <div className="flex items-center gap-2">
           <button
             onClick={() => {
@@ -583,9 +559,7 @@ export default function App() {
         {/* Sidebar */}
         {!isFullscreen && (
           <aside
-            className={`${
-              sidebarCollapsed ? "w-0 opacity-0" : "w-[360px] opacity-100"
-            } flex flex-col border-r border-white/[0.06] glass-panel flex-shrink-0 transition-all duration-300 overflow-hidden`}
+            className={`${sidebarCollapsed ? "w-0 opacity-0" : "w-[360px] opacity-100"} flex flex-col border-r border-white/[0.06] glass-panel flex-shrink-0 transition-all duration-300 overflow-hidden`}
           >
             <div className="flex items-center gap-1 p-3 border-b border-white/[0.04]">
               {tabs.map((t) => (
@@ -602,7 +576,6 @@ export default function App() {
             <div className="flex-1 overflow-y-auto inspector-scroll p-4 space-y-5">
               {activeTab === "design" && (
                 <>
-                  {/* Presets */}
                   <section>
                     <div className="section-label mb-3">Curated Templates</div>
                     <div className="grid grid-cols-2 gap-2">
@@ -615,15 +588,14 @@ export default function App() {
                           <div className="text-[9px] uppercase tracking-wider text-luxury-gold/50 mb-0.5">
                             {p.tag}
                           </div>
-                          <div className="text-xs font-medium text-luxury-pearl/90">{p.name}</div>
+                          <div className="text-xs font-medium text-luxury-pearl/90">
+                            {p.name}
+                          </div>
                         </button>
                       ))}
                     </div>
                   </section>
-
                   <div className="h-px bg-white/[0.04]" />
-
-                  {/* Format & Layout */}
                   <section className="space-y-3">
                     <div className="section-label">Document Format</div>
                     <div className="grid grid-cols-3 gap-1.5">
@@ -631,11 +603,7 @@ export default function App() {
                         <button
                           key={key}
                           onClick={() => set({ format: key })}
-                          className={`text-[10px] py-2 rounded-lg border transition-all ${
-                            settings.format === key
-                              ? "border-luxury-gold/40 bg-luxury-gold/10 text-luxury-gold-light"
-                              : "border-white/[0.06] text-luxury-pearl/40 hover:border-white/[0.12]"
-                          }`}
+                          className={`text-[10px] py-2 rounded-lg border transition-all ${settings.format === key ? "border-luxury-gold/40 bg-luxury-gold/10 text-luxury-gold-light" : "border-white/[0.06] text-luxury-pearl/40 hover:border-white/[0.12]"}`}
                         >
                           {f.label}
                         </button>
@@ -646,21 +614,14 @@ export default function App() {
                         <button
                           key={o}
                           onClick={() => set({ orientation: o })}
-                          className={`flex-1 text-[11px] py-2 rounded-lg border capitalize transition-all ${
-                            settings.orientation === o
-                              ? "border-luxury-gold/40 bg-luxury-gold/10 text-luxury-gold-light"
-                              : "border-white/[0.06] text-luxury-pearl/40 hover:border-white/[0.12]"
-                          }`}
+                          className={`flex-1 text-[11px] py-2 rounded-lg border capitalize transition-all ${settings.orientation === o ? "border-luxury-gold/40 bg-luxury-gold/10 text-luxury-gold-light" : "border-white/[0.06] text-luxury-pearl/40 hover:border-white/[0.12]"}`}
                         >
                           {o}
                         </button>
                       ))}
                     </div>
                   </section>
-
                   <div className="h-px bg-white/[0.04]" />
-
-                  {/* Layout modes */}
                   <section className="space-y-3">
                     <div className="section-label">Layout Engine</div>
                     <div className="grid grid-cols-3 gap-1.5">
@@ -669,11 +630,7 @@ export default function App() {
                           key={key}
                           onClick={() => set({ layoutMode: key })}
                           title={m.description}
-                          className={`flex flex-col items-center gap-1 py-2.5 rounded-lg border transition-all ${
-                            settings.layoutMode === key
-                              ? "border-luxury-gold/40 bg-luxury-gold/10 text-luxury-gold-light"
-                              : "border-white/[0.06] text-luxury-pearl/40 hover:border-white/[0.12]"
-                          }`}
+                          className={`flex flex-col items-center gap-1 py-2.5 rounded-lg border transition-all ${settings.layoutMode === key ? "border-luxury-gold/40 bg-luxury-gold/10 text-luxury-gold-light" : "border-white/[0.06] text-luxury-pearl/40 hover:border-white/[0.12]"}`}
                         >
                           <span className="text-base">{m.icon}</span>
                           <span className="text-[9px]">{m.label}</span>
@@ -681,10 +638,7 @@ export default function App() {
                       ))}
                     </div>
                   </section>
-
                   <div className="h-px bg-white/[0.04]" />
-
-                  {/* Rule params */}
                   <section className="space-y-4">
                     <div className="section-label">Rule Parameters</div>
                     <PremiumSlider
@@ -708,11 +662,7 @@ export default function App() {
                         <button
                           key={key}
                           onClick={() => set({ lineStyle: key })}
-                          className={`flex-1 text-[10px] py-2 rounded-lg border transition-all ${
-                            settings.lineStyle === key
-                              ? "border-luxury-gold/40 bg-luxury-gold/10 text-luxury-gold-light"
-                              : "border-white/[0.06] text-luxury-pearl/40"
-                          }`}
+                          className={`flex-1 text-[10px] py-2 rounded-lg border transition-all ${settings.lineStyle === key ? "border-luxury-gold/40 bg-luxury-gold/10 text-luxury-gold-light" : "border-white/[0.06] text-luxury-pearl/40"}`}
                         >
                           {s.label}
                         </button>
@@ -731,10 +681,7 @@ export default function App() {
                       />
                     </div>
                   </section>
-
                   <div className="h-px bg-white/[0.04]" />
-
-                  {/* Margin */}
                   <section className="space-y-4">
                     <div className="section-label">Margin Guidelines</div>
                     <PremiumSlider
@@ -765,7 +712,9 @@ export default function App() {
                   <section className="space-y-4">
                     <div className="section-label">Header & Footer</div>
                     <div className="space-y-2">
-                      <label className="text-[11px] text-luxury-pearl/50">Header Text</label>
+                      <label className="text-[11px] text-luxury-pearl/50">
+                        Header Text
+                      </label>
                       <input
                         value={settings.headerText}
                         onChange={(e) => set({ headerText: e.target.value })}
@@ -774,7 +723,9 @@ export default function App() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[11px] text-luxury-pearl/50">Footer Text</label>
+                      <label className="text-[11px] text-luxury-pearl/50">
+                        Footer Text
+                      </label>
                       <input
                         value={settings.footerText}
                         onChange={(e) => set({ footerText: e.target.value })}
@@ -783,13 +734,13 @@ export default function App() {
                       />
                     </div>
                   </section>
-
                   <div className="h-px bg-white/[0.04]" />
-
                   <section className="space-y-4">
                     <div className="section-label">Watermark</div>
                     <div className="space-y-2">
-                      <label className="text-[11px] text-luxury-pearl/50">Watermark Text</label>
+                      <label className="text-[11px] text-luxury-pearl/50">
+                        Watermark Text
+                      </label>
                       <input
                         value={settings.watermarkText}
                         onChange={(e) => set({ watermarkText: e.target.value })}
@@ -818,15 +769,15 @@ export default function App() {
                         <button
                           key={key}
                           onClick={() => set({ exportQuality: key })}
-                          className={`w-full flex items-center justify-between p-3 rounded-xl border transition-all ${
-                            settings.exportQuality === key
-                              ? "border-luxury-gold/40 bg-luxury-gold/10"
-                              : "border-white/[0.06] hover:border-white/[0.12]"
-                          }`}
+                          className={`w-full flex items-center justify-between p-3 rounded-xl border transition-all ${settings.exportQuality === key ? "border-luxury-gold/40 bg-luxury-gold/10" : "border-white/[0.06] hover:border-white/[0.12]"}`}
                         >
                           <div className="text-left">
-                            <div className="text-sm text-luxury-pearl/80">{q.label}</div>
-                            <div className="text-[10px] text-luxury-pearl/30">{q.dpi} DPI</div>
+                            <div className="text-sm text-luxury-pearl/80">
+                              {q.label}
+                            </div>
+                            <div className="text-[10px] text-luxury-pearl/30">
+                              {q.dpi} DPI
+                            </div>
                           </div>
                           <span className="text-[9px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-luxury-gold/15 text-luxury-gold/80">
                             {q.badge}
@@ -835,9 +786,7 @@ export default function App() {
                       ))}
                     </div>
                   </section>
-
                   <div className="h-px bg-white/[0.04]" />
-
                   <section className="space-y-4">
                     <div className="section-label">Multi-Page Export</div>
                     <PremiumSlider
@@ -849,9 +798,7 @@ export default function App() {
                       format={(v) => `${v} page${v > 1 ? "s" : ""}`}
                     />
                   </section>
-
                   <div className="h-px bg-white/[0.04]" />
-
                   {recentExports.length > 0 && (
                     <section>
                       <div className="section-label mb-3">Recent Exports</div>
@@ -876,17 +823,19 @@ export default function App() {
               )}
             </div>
 
-            {/* Sidebar footer actions */}
             <div className="p-4 border-t border-white/[0.04] space-y-2 flex-shrink-0">
               <button
                 onClick={handleExportPDF}
                 disabled={downloading}
                 className="luxury-btn-primary w-full text-xs uppercase tracking-[0.15em] disabled:opacity-50"
               >
-                {downloading ? "Rendering Vector Paths..." : "Export Vector PDF"}
+                {downloading ? "Rendering..." : "Export PDF"}
               </button>
               <div className="grid grid-cols-2 gap-2">
-                <button onClick={handleExportPNG} className="luxury-btn-secondary text-[11px]">
+                <button
+                  onClick={handleExportPNG}
+                  className="luxury-btn-secondary text-[11px]"
+                >
                   Save PNG
                 </button>
                 <button
@@ -897,10 +846,16 @@ export default function App() {
                 </button>
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <button onClick={copyConfig} className="luxury-btn-secondary text-[11px]">
+                <button
+                  onClick={copyConfig}
+                  className="luxury-btn-secondary text-[11px]"
+                >
                   Copy Config
                 </button>
-                <button onClick={() => applyPreset("executive")} className="luxury-btn-secondary text-[11px]">
+                <button
+                  onClick={() => applyPreset("executive")}
+                  className="luxury-btn-secondary text-[11px]"
+                >
                   Reset
                 </button>
               </div>
@@ -908,7 +863,6 @@ export default function App() {
           </aside>
         )}
 
-        {/* Collapse toggle */}
         {!isFullscreen && (
           <button
             onClick={() => setSidebarCollapsed((c) => !c)}
@@ -919,13 +873,18 @@ export default function App() {
           </button>
         )}
 
-        {/* Main viewport */}
-        <main ref={viewportRef} className="flex-1 flex flex-col overflow-hidden min-w-0">
-          {/* Toolbar */}
+        <main
+          ref={viewportRef}
+          className="flex-1 flex flex-col overflow-hidden min-w-0"
+        >
           <div className="flex items-center justify-between px-4 py-2 border-b border-white/[0.04] glass-panel flex-shrink-0">
             <div className="flex items-center gap-3">
-              <span className="text-[10px] uppercase tracking-wider text-luxury-pearl/30">Live Preview</span>
-              <span className="text-[10px] font-mono text-luxury-gold/50">{stats.pageSize}</span>
+              <span className="text-[10px] uppercase tracking-wider text-luxury-pearl/30">
+                Live Preview
+              </span>
+              <span className="text-[10px] font-mono text-luxury-gold/50">
+                {stats.pageSize}
+              </span>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -934,14 +893,19 @@ export default function App() {
               >
                 −
               </button>
-              <span className="text-[11px] font-mono text-luxury-pearl/50 w-12 text-center">{zoom}%</span>
+              <span className="text-[11px] font-mono text-luxury-pearl/50 w-12 text-center">
+                {zoom}%
+              </span>
               <button
                 onClick={() => setZoom((z) => Math.min(400, z + 25))}
                 className="kbd cursor-pointer hover:bg-white/10"
               >
                 +
               </button>
-              <button onClick={() => setZoom(100)} className="luxury-btn-secondary text-[10px] px-2 py-1 ml-1">
+              <button
+                onClick={() => setZoom(100)}
+                className="luxury-btn-secondary text-[10px] px-2 py-1 ml-1"
+              >
                 Fit
               </button>
               <button
@@ -953,11 +917,13 @@ export default function App() {
             </div>
           </div>
 
-          {/* Canvas area */}
           <div className="flex-1 flex items-center justify-center p-6 overflow-auto inspector-scroll relative">
             <div
               className="relative transition-transform duration-300 ease-out"
-              style={{ transform: `scale(${zoom / 100})`, transformOrigin: "center center" }}
+              style={{
+                transform: `scale(${zoom / 100})`,
+                transformOrigin: "center center",
+              }}
             >
               <canvas
                 ref={canvasRef}
@@ -966,28 +932,37 @@ export default function App() {
                 className="shadow-luxury-lg rounded-sm object-contain max-h-[calc(100vh-8rem)] max-w-full"
                 style={{ backgroundColor: settings.paperColor }}
               />
-              {/* Paper edge highlight */}
               <div className="absolute inset-0 rounded-sm pointer-events-none ring-1 ring-black/10" />
             </div>
           </div>
 
-          {/* Status bar */}
           <div className="flex items-center justify-between px-4 py-2 border-t border-white/[0.04] glass-panel flex-shrink-0 text-[10px] font-mono">
             <div className="flex items-center gap-4 text-luxury-pearl/30">
               <span>
-                Lines: <span className="text-luxury-gold-light/70">{stats.lineCount}</span>
+                Lines:{" "}
+                <span className="text-luxury-gold-light/70">
+                  {stats.lineCount}
+                </span>
               </span>
               <span>
-                Spacing: <span className="text-luxury-gold-light/70">{stats.spacingMm}mm</span>
+                Spacing:{" "}
+                <span className="text-luxury-gold-light/70">
+                  {stats.spacingMm}mm
+                </span>
               </span>
               <span>
-                Margin: <span className="text-luxury-gold-light/70">{stats.marginMm}mm</span>
+                Margin:{" "}
+                <span className="text-luxury-gold-light/70">
+                  {stats.marginMm}mm
+                </span>
               </span>
             </div>
             <div className="flex items-center gap-4 text-luxury-pearl/30">
               <span>{stats.pixelSize}px</span>
               <span>{LAYOUT_MODES[settings.layoutMode]?.label}</span>
-              <span className="text-luxury-gold/40">{EXPORT_QUALITIES[settings.exportQuality]?.label}</span>
+              <span className="text-luxury-gold/40">
+                {EXPORT_QUALITIES[settings.exportQuality]?.label}
+              </span>
             </div>
           </div>
         </main>
@@ -1003,7 +978,10 @@ export default function App() {
         query={cmdQuery}
         setQuery={setCmdQuery}
       />
-      <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      <ShortcutsModal
+        open={shortcutsOpen}
+        onClose={() => setShortcutsOpen(false)}
+      />
       <Toast {...toast} />
     </div>
   );
